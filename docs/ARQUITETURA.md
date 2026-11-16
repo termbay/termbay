@@ -1,14 +1,14 @@
-# Arquitetura do officeAgents
+# Arquitetura do termbay
 
 > Status: proposta, antes do primeiro código. Atualizado em 16/11/2026.
 
 ## Visão
 
-O officeAgents é um **terminal de verdade**, leve e open source, no estilo do Warp. Nele dá pra rodar qualquer comando: `git`, `npm`, `vim`, `ssh` e o próprio `claude`.
+O termbay é um **terminal de verdade**, leve e open source, no estilo do Warp. Nele dá pra rodar qualquer comando: `git`, `npm`, `vim`, `ssh` e o próprio `claude`.
 
 O diferencial é o **escritório**: quando o Claude Code trabalha com agentes, um painel mostra um escritório em 2D. Cada agente é um funcionário com nome, mesa e personalidade, e balões mostram o que cada um está fazendo e com quem está conversando.
 
-Ao iniciar um projeto novo, o officeAgents lê o escopo e **monta o time de agentes automaticamente**.
+Ao iniciar um projeto novo, o termbay lê o escopo e **monta o time de agentes automaticamente**.
 
 ```
 ┌──────────────────────────────┬─────────────────────┐
@@ -30,7 +30,7 @@ Ao iniciar um projeto novo, o officeAgents lê o escopo e **monta o time de agen
 
 ## Conta do Claude
 
-O officeAgents usa o **Claude Code oficial** (`claude`) que o usuário instala e no qual faz login com a própria conta, seja assinatura Pro/Max ou chave de API.
+O termbay usa o **Claude Code oficial** (`claude`) que o usuário instala e no qual faz login com a própria conta, seja assinatura Pro/Max ou chave de API.
 
 - **Na primeira execução:** o app verifica se o `claude` está instalado (`claude --version`) e logado. Se não estiver, mostra como instalar e fazer login, e para por aí.
 - **Recrutador:** também usa a conta do usuário, chamando `claude -p` (modo sem interface).
@@ -39,8 +39,8 @@ O officeAgents usa o **Claude Code oficial** (`claude`) que o usuário instala e
 ## Visão geral dos componentes
 
 ```
-officeAgents/
-├── core/         Rust, binário único `officeagents`
+termbay/
+├── core/         Rust, binário único `termbay`
 │   ├── pty         abre o shell do usuário (portable-pty)
 │   ├── eventos     servidor local que recebe eventos dos hooks
 │   ├── estado      agentes, mesas, o que cada um está fazendo
@@ -62,7 +62,7 @@ officeAgents/
           ┌──────────┴───────────────────────┴────────┐
           │                 core (Rust)                │
           │   pty  ◄─── shell do usuário ───► claude   │
-          │   eventos ◄── `officeagents hook` ◄── hooks│
+          │   eventos ◄── `termbay hook` ◄── hooks│
           └────────────────────────────────────────────┘
 ```
 
@@ -72,11 +72,11 @@ officeAgents/
 - **eventos:** servidor em `127.0.0.1`, numa porta aleatória, com um token por sessão. Recebe os eventos crus dos hooks e os traduz para o formato próprio (ver abaixo).
 - **estado:** mantém quem está no escritório, o que cada um está fazendo e o histórico recente de balões.
 - **cli:**
-  - `officeagents`: abre o app.
-  - `officeagents hook`: chamado pelos hooks do Claude Code. Lê o JSON da entrada padrão e envia ao servidor local. Por ser o próprio binário, o usuário não precisa de Node nem Python.
-  - `officeagents init`: roda o recrutador no projeto atual.
-  - `officeagents serve`: modo navegador. Abre a mesma interface em `localhost`, pra máquinas sem interface gráfica, SSH ou máquinas fracas.
-  - `officeagents doctor`: verifica `claude`, login, hooks e shell.
+  - `termbay`: abre o app.
+  - `termbay hook`: chamado pelos hooks do Claude Code. Lê o JSON da entrada padrão e envia ao servidor local. Por ser o próprio binário, o usuário não precisa de Node nem Python.
+  - `termbay init`: roda o recrutador no projeto atual.
+  - `termbay serve`: modo navegador. Abre a mesma interface em `localhost`, pra máquinas sem interface gráfica, SSH ou máquinas fracas.
+  - `termbay doctor`: verifica `claude`, login, hooks e shell.
 
 ### ui (TypeScript)
 
@@ -87,7 +87,7 @@ officeAgents/
 ### app (Tauri)
 
 - **Por que Tauri:** ele usa o navegador que já vem no sistema (WebView2, WKWebView ou WebKitGTK), então o instalador fica em cerca de 10–15 MB, contra mais de 150 MB do Electron, e usa bem menos memória.
-- **Mesma interface no navegador:** a pasta `ui/` é servida igual no `officeagents serve`.
+- **Mesma interface no navegador:** a pasta `ui/` é servida igual no `termbay serve`.
 
 ## Formato de eventos
 
@@ -114,19 +114,19 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 ## Integração com o Claude Code (hooks)
 
-- **Instalação:** o `officeagents init` (ou `doctor --fix`) adiciona ao `.claude/settings.json` do projeto hooks que chamam `officeagents hook <evento>`.
+- **Instalação:** o `termbay init` (ou `doctor --fix`) adiciona ao `.claude/settings.json` do projeto hooks que chamam `termbay hook <evento>`.
 - **Eventos de interesse:** início e fim de subagente, uso de ferramenta (antes e depois), notificações (aguardando o usuário) e fim da sessão.
 - **Conversa entre agentes:** subagentes comuns só reportam ao agente principal. Conversa de verdade entre funcionários depende do recurso de times do Claude Code, em que agentes trocam mensagens. **A validar** quanto disso aparece nos hooks (ver riscos).
 - **Fallback:** se faltar algum evento nos hooks, ler as transcrições da sessão em `~/.claude/projects/` em modo somente leitura.
 
 ## Recrutador automático
 
-`officeagents init` em um projeto:
+`termbay init` em um projeto:
 
 1. **Escopo:** lê o README, uma descrição passada pelo usuário ou faz algumas perguntas curtas.
 2. **Proposta:** chama `claude -p` pedindo um `time.json` com cargos, nomes, personalidade e visual de cada funcionário, escolhidos do catálogo.
 3. **Aprovação:** mostra o time pro usuário, que pode trocar, remover ou adicionar funcionários.
-4. **Geração:** cria os arquivos `.claude/agents/<nome>.md` e salva o `time.json` em `.officeagents/`.
+4. **Geração:** cria os arquivos `.claude/agents/<nome>.md` e salva o `time.json` em `.termbay/`.
 
 ```json
 {
@@ -163,7 +163,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar.
 1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela.
 2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões.
-3. **Recrutador:** `officeagents init` com catálogo de cargos.
+3. **Recrutador:** `termbay init` com catálogo de cargos.
 4. **Conversa entre agentes:** times do Claude Code nos balões.
 5. **Extras:** blocos estilo Warp, modo navegador polido, tradutores para outras ferramentas, 3D opcional.
 

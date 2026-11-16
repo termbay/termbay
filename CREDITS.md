@@ -1,6 +1,6 @@
 # Créditos
 
-Código, textos e modelos de terceiros usados ou adaptados no officeAgents. Arte, sons e fontes ficam em [assets/CREDITS.md](assets/CREDITS.md).
+Código, textos e modelos de terceiros usados ou adaptados no termbay. Arte, sons e fontes ficam em [assets/CREDITS.md](assets/CREDITS.md).
 
 Cada entrada informa o que foi usado, de onde veio, a licença e onde está no repositório.
 

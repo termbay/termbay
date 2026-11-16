@@ -1,4 +1,4 @@
-# officeAgents
+# termbay
 
 Terminal leve e open source, no estilo do Warp, com um escritório 2D que mostra os agentes do Claude trabalhando. A fonte da verdade é `docs/ARQUITETURA.md`: leia antes de qualquer mudança e atualize quando uma decisão mudar.
 

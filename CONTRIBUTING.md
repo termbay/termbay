@@ -1,6 +1,6 @@
 # Como contribuir
 
-Que bom que você quer ajudar o officeAgents! Toda contribuição é bem-vinda: código, sprites, temas, tradutores de eventos, documentação, testes e relatos de bug.
+Que bom que você quer ajudar o termbay! Toda contribuição é bem-vinda: código, sprites, temas, tradutores de eventos, documentação, testes e relatos de bug.
 
 Ao participar, você concorda com o nosso [Código de Conduta](CODE_OF_CONDUCT.md).
 
@@ -20,7 +20,7 @@ Ao participar, você concorda com o nosso [Código de Conduta](CODE_OF_CONDUCT.m
 
 ## Licenças
 
-O officeAgents é licenciado sob a [MIT](LICENSE). Ao enviar uma contribuição, você concorda que ela seja distribuída sob essa licença.
+O termbay é licenciado sob a [MIT](LICENSE). Ao enviar uma contribuição, você concorda que ela seja distribuída sob essa licença.
 
 - **Dependências:** só com licença permissiva compatível com MIT (MIT, Apache-2.0, BSD, ISC, Zlib, CC0). GPL, AGPL e licenças proprietárias não são aceitas.
 - **Código de outros projetos:** mantenha o aviso de licença original e adicione uma entrada em [CREDITS.md](CREDITS.md).

@@ -1,5 +1,5 @@
 {
-  "projeto": "officeAgents",
+  "projeto": "termbay",
   "time": [
     { "nome": "Heitor", "agente": "heitor-arquiteto", "cargo": "arquiteto",   "personalidade": "calmo, pensa em diagramas" },
     { "nome": "Ana",    "agente": "ana-core",         "cargo": "core-rust",   "personalidade": "metódica, obcecada por leveza" },

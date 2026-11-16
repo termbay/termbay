@@ -1,14 +1,16 @@
-# officeAgents
+# termbay
 
 Um terminal leve e open source, no estilo do Warp, onde seus agentes do Claude trabalham num escritório em 2D.
 
 - **Terminal de verdade:** rode qualquer comando, com abas e divisão de tela.
 - **Escritório:** quando o Claude usa agentes, cada um vira um funcionário com nome e mesa, e balões mostram o que estão fazendo e com quem estão conversando.
-- **Time automático:** `officeagents init` lê o escopo do projeto e monta o time de agentes.
+- **Time automático:** `termbay init` lê o escopo do projeto e monta o time de agentes.
 - **Sua conta:** usa o Claude Code oficial com o seu próprio login. O app não guarda credenciais.
 - **Leve:** binário pequeno, roda em macOS, Linux e Windows.
 
 > Status: em planejamento. Veja [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+
+> O termbay é um projeto independente, sem relação com a Anthropic nem com a Microsoft. "Claude" e "Claude Code" são marcas da Anthropic.
 
 ## Contribuindo
 
