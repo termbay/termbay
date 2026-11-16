@@ -1,0 +1,56 @@
+name: Bug
+description: Algo não funciona como deveria
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por reportar! Para vulnerabilidades, **não use este formulário**: veja o SECURITY.md.
+        Não cole tokens, chaves, caminhos pessoais nem conteúdo privado.
+  - type: textarea
+    id: o-que-aconteceu
+    attributes:
+      label: O que aconteceu
+      description: E o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Abri o officeAgents
+        2. Rodei `claude` e pedi ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Versão do officeAgents
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Versão do Claude Code (`claude --version`)
+  - type: dropdown
+    id: sistema
+    attributes:
+      label: Sistema operacional
+      options:
+        - macOS
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      placeholder: zsh, fish, bash, PowerShell...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs ou saída de `officeagents doctor`
+      render: shell

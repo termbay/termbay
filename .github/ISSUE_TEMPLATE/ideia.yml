@@ -1,0 +1,36 @@
+name: Ideia ou funcionalidade
+description: Sugira algo novo para o terminal, o escritório ou o recrutador
+labels: ["ideia"]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qual problema isso resolve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: Como você imagina a solução?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - Terminal
+        - Escritório
+        - Recrutador
+        - Integração com o Claude Code
+        - Outra
+    validations:
+      required: true
+  - type: checkboxes
+    id: principios
+    attributes:
+      label: Princípios do projeto
+      description: Veja docs/ARQUITETURA.md.
+      options:
+        - label: A ideia mantém o app leve e funciona em macOS, Linux e Windows.
+        - label: A ideia não exige guardar credenciais nem servidor externo.

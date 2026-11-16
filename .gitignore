@@ -1,0 +1,36 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+
+# Tauri
+app/src-tauri/target/
+app/src-tauri/gen/
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Claude Code: configuração pessoal (a do projeto, .claude/settings.json e .claude/agents/, é versionada)
+.claude/settings.local.json
+
+# Sistema e editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Gravações de eventos da fase 0 sem anonimizar
+recordings/raw/
