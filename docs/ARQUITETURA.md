@@ -116,7 +116,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 - **Instalação:** o `termbay init` (ou `doctor --fix`) adiciona ao `.claude/settings.json` do projeto hooks que chamam `termbay hook <evento>`.
 - **Eventos de interesse:** início e fim de subagente, uso de ferramenta (antes e depois), pedido de permissão, erros de ferramenta, tarefas e fim da sessão. Lista final e motivos em [FASE0-HOOKS.md](FASE0-HOOKS.md). Não registrar `MessageDisplay` (bloqueia a exibição do texto) nem `WorktreeCreate` (substitui o comportamento padrão).
-- **Conversa entre agentes:** toda mensagem passa pela ferramenta `SendMessage`, e o hook `PreToolUse` traz remetente, destinatário e texto completo. Funciona também entre subagentes nomeados, sem times (validado na fase 0, Claude Code 2.1.311). Times de verdade só existem em sessão interativa e ainda faltam testar.
+- **Conversa entre agentes:** toda mensagem passa pela ferramenta `SendMessage`, e o hook `PreToolUse` traz remetente, destinatário e texto completo. Funciona também entre subagentes nomeados, sem times (validado na fase 0, Claude Code 2.1.311). Em times de agentes (só em sessão interativa) é ainda melhor: o nome do teammate vem em todos os eventos, a criação devolve uma cor para cada um e o `SendMessage` já traz remetente, destinatário, cores e resumo.
 - **Fallback:** as transcrições da sessão em `~/.claude/projects/` (somente leitura) trazem o que os hooks não trazem: falas intermediárias dos subagentes e a mensagem recebida. Formato não documentado, então fica fora do MVP, como enriquecimento opcional.
 
 ## Recrutador automático
@@ -160,7 +160,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 ## Roteiro
 
-0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar. Feito com subagentes em 16/11/2026 ([FASE0-HOOKS.md](FASE0-HOOKS.md)); falta uma sessão interativa curta com times.
+0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar. Feito em 16/11/2026 com subagentes e com um time in-process em sessão interativa ([FASE0-HOOKS.md](FASE0-HOOKS.md)).
 1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela.
 2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões.
 3. **Recrutador:** `termbay init` com catálogo de cargos.
@@ -169,7 +169,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 ## Riscos e pontos em aberto
 
-- **Eventos dos hooks:** a fase 0 mostrou que os hooks cobrem ferramentas, subagentes e mensagens enviadas ([FASE0-HOOKS.md](FASE0-HOOKS.md)). Falta testar times de agentes numa sessão interativa (teammates in-process e em painel dividido, `TeammateIdle`), o que não dá pra fazer com `claude -p`.
+- **Eventos dos hooks:** a fase 0 mostrou que os hooks cobrem ferramentas, subagentes e mensagens enviadas ([FASE0-HOOKS.md](FASE0-HOOKS.md)). Times de agentes in-process também foram validados, com `TeammateIdle`. Falta só o modo de painel dividido (tmux/iTerm2), em que cada teammate é um processo separado.
 - **Termos da Anthropic:** confirmar que usar o `claude` oficial a partir de um app de terceiros é permitido com assinatura.
 - **Projetos parecidos:** pesquisa feita em 16/11/2026, ver [PROJETOS-PARECIDOS.md](PROJETOS-PARECIDOS.md). O escritório sozinho já existe (Pixel Agents e outros); o diferencial é o terminal, o recrutador e a conversa entre agentes, e o nome pode confundir.
 - **Arte:** sprites próprios ou CC0. Nada de assets de jogos existentes.

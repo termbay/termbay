@@ -1,6 +1,6 @@
 # Fase 0: o que os hooks do Claude Code expõem
 
-> Testado em 16/11/2026 com **Claude Code 2.1.311** no macOS, em modo não interativo (`claude -p`, modelo `haiku`).
+> Testado em 16/11/2026 com **Claude Code 2.1.311** no macOS, em modo não interativo (`claude -p`, modelo `haiku`) e numa sessão interativa com time de agentes (sessão G).
 > Referência: [Hooks reference](https://code.claude.com/docs/en/hooks), [Agent teams](https://code.claude.com/docs/en/agent-teams), [Subagents](https://code.claude.com/docs/en/sub-agents), [Tools reference](https://code.claude.com/docs/en/tools-reference).
 
 ## Resumo
@@ -9,7 +9,7 @@
 - **Quem agiu:** eventos do agente principal chegam **sem** `agent_id`; eventos de subagente chegam com `agent_id` e `agent_type`. O **nome** do funcionário (`name`, ex.: `bruno`) não vem nos eventos do próprio subagente: vem no `PreToolUse` do `Agent` que o criou.
 - **Mensagens entre agentes aparecem com texto completo:** toda mensagem passa pela ferramenta `SendMessage`, e o `PreToolUse`/`PostToolUse` dela traz remetente (`agent_id` ou principal), destinatário (`to`), resumo (`summary`) e texto (`message`). Testado com subagentes nomeados trocando mensagens de verdade (Ana → Bruno → Ana).
 - **O que falta:** as "falas" intermediárias dos subagentes (texto que eles escrevem entre ferramentas) não chegam por hook; só a resposta final (`last_assistant_message` no `SubagentStop`).
-- **Times de agentes (agent teams) não foram testados de ponta a ponta:** não é possível criar teammates com `claude -p` (documentado e confirmado). A tentativa de sessão interativa automatizada parou na tela de confiança da pasta. O que está abaixo sobre times vem só da documentação.
+- **Times de agentes funcionam ainda melhor que subagentes:** testados numa sessão interativa (sessão G). Em teammates, o **nome** vem em todos os eventos (`agent_type` = nome, `agent_id` começa com o nome), a criação já devolve o `agent_id` na hora, o Claude Code atribui uma **cor** a cada teammate e o `SendMessage` traz remetente, destinatário, cores, resumo e texto. `TeammateIdle` marca quando cada um fica ocioso. Só os teammates em painel dividido (tmux/iTerm2) ficaram sem teste.
 - **Recomendação:** hooks como fonte principal. Plano B (transcrições) só como enriquecimento opcional e somente leitura, fora do MVP.
 
 ## Como foi testado
@@ -23,9 +23,10 @@
 | A | `Write`, `Bash`, um subagente `general-purpose` em primeiro plano, um comando negado (`curl`) |
 | B | dois subagentes customizados em paralelo, `SendMessage` (sem `name`, falhou por nome e funcionou por id) |
 | C | `TaskCreate`/`TaskUpdate`, subagentes com `name` (`ana`, `bruno`) trocando mensagens, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` ligado |
-| D | sessão **interativa** com time (via `expect`): não chegou a rodar, ver "O que ficou sem teste" |
+| D | sessão interativa com time (via `expect`): fechou na tela de confiança da pasta, substituída pela G |
 | E | ferramenta bloqueada fora da pasta, subagente em segundo plano (`run_in_background: true`) |
 | F | `Read` de arquivo inexistente, `CLAUDE.md` carregado |
+| G | sessão **interativa** (via `expect`, aceitando a confiança só na pasta de teste) com `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`: time com `ana` e `bruno` in-process, `Bash`, mensagens entre os dois, desligamento do time. 80 eventos em 37 s |
 
 Os JSONL crus ficaram fora do repositório. Os exemplos abaixo foram reduzidos e anonimizados.
 
@@ -65,7 +66,7 @@ Coluna "Visto": sim = chegou nos testes; doc = só na documentação; não = nã
 | `TaskCompleted` | sim | igual ao anterior | post-it vai para "feito" |
 | `Stop` | sim | `last_assistant_message`, `background_tasks` | chefe terminou o turno. Se `background_tasks` não estiver vazio, o escritório continua trabalhando |
 | `StopFailure` | doc | erro de API no fim do turno | alerta |
-| `TeammateIdle` | doc | `teammate_name`, `agent_id` | teammate vai para o café |
+| `TeammateIdle` | sim | `teammate_name`, `team_name`, `agent_id`, `agent_type` | teammate vai para o café. Chega logo depois de cada `SubagentStop` do teammate |
 | `FileChanged` | sim | `file_path`, `event` (`add`...) | só para arquivos listados no `matcher`; pouco útil |
 | `SessionEnd` | sim | `reason` | escritório fecha, todos vão embora |
 | `Setup`, `UserPromptExpansion`, `ConfigChange`, `CwdChanged`, `DirectoryAdded`, `PreCompact`, `PostCompact`, `PreModelSwitch`, `PostModelSwitch`, `Elicitation`, `ElicitationResult`, `WorktreeCreate`, `WorktreeRemove` | não/doc | | sem uso no MVP |
@@ -92,6 +93,7 @@ Coluna "Visto": sim = chegou nos testes; doc = só na documentação; não = nã
   - Primeiro plano: `PreToolUse Agent` (tem `tool_use_id` e `name`) → `SubagentStart` (tem `agent_id`) → ... → `SubagentStop` → `PostToolUse Agent` (tem `tool_use_id` **e** `tool_response.agentId`). A ligação definitiva só chega no fim. Com um único subagente, a ordem resolve; com vários em paralelo (sessão B), a ordem dos `SubagentStart` seguiu a dos `PreToolUse`, mas isso não é garantido pela doc. Heurística: casar por `agent_type` em ordem de chegada e corrigir quando o `PostToolUse` chegar.
   - Segundo plano: `PostToolUse Agent` chega **antes** do `SubagentStart`, já com `agentId` e `status: "async_launched"`. Ligação imediata.
 - **Retomada:** quando alguém manda `SendMessage` para um subagente que já terminou, chega um novo `SubagentStart` com o **mesmo** `agent_id`. O funcionário "volta para a mesa".
+- **Agentes internos:** na sessão G chegaram `SubagentStop` com `agent_type` **vazio** e ids aleatórios, sem `SubagentStart` correspondente. São agentes auxiliares do próprio Claude Code (por exemplo, sugestões de próximo passo). O tradutor deve ignorar eventos com `agent_type` vazio.
 
 ## Mensagens entre agentes
 
@@ -122,7 +124,7 @@ Observação: no modo `auto`, subagentes entregam o relatório pela ferramenta `
 2. **Nome do subagente nos próprios eventos:** só `agent_type` e `agent_id`. Resolvido guardando o mapa no tradutor (ver acima).
 3. **Ligação `Agent` → `agent_id` em paralelo:** só é garantida no `PostToolUse` (primeiro plano). Animação pode chegar com o funcionário "genérico" e ganhar o nome alguns segundos depois, ou usar a heurística por ordem.
 4. **Mensagem recebida:** o hook mostra o envio; o recebimento só aparece na transcrição do destinatário (`origin.kind: "peer"`).
-5. **Times de agentes:** sem teste real (ver abaixo).
+5. **Times de agentes:** testados in-process; só o modo de painel dividido ficou sem teste (ver abaixo).
 6. **`Notification` e `PermissionDenied`:** não disparam em `-p` / fora do modo `auto`. Para "aguardando o usuário", `PermissionRequest` é mais confiável e imediato.
 7. **Volume:** uma sessão trivial gerou de 20 a 30 eventos, e cada hook abre um processo. `termbay hook` precisa ser rápido, e o `init` deve registrar só os eventos necessários.
 8. **Privacidade:** os payloads trazem conteúdo de arquivos (`Write.content`, `Read.tool_response`), comandos e caminhos com o nome do usuário. O tradutor deve descartar isso logo na entrada e mandar à interface só o resumo (nome do arquivo, `description`, `summary`).
@@ -130,16 +132,19 @@ Observação: no modo `auto`, subagentes entregam o relatório pela ferramenta `
 ## Times de agentes (agent teams)
 
 - **Pela documentação:** experimental, ligado por `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. Teammates in-process disparam hooks com `agent_id`; `SubagentStart` dispara "cada vez que um teammate in-process trata uma nova mensagem"; `TeammateIdle` traz `teammate_name`; `TaskCreated`/`TaskCompleted` trazem `teammate_name`. A troca de mensagens usa a mesma `SendMessage`, então deve ser capturada do mesmo jeito. As caixas de entrada ficam em `~/.claude/teams/{time}/inboxes/{agente}.json`.
-- **Pelo teste:** com a variável ligada em `-p` (sessão C), agentes com `name` rodaram como subagentes comuns: `agent_type` do arquivo de agente, sem `teammate_name`, sem `TeammateIdle`. Isso bate com a doc: "em modo não interativo com `-p`, o Claude não cria teammates".
+- **Em `-p` (sessão C):** com a variável ligada, agentes com `name` rodaram como subagentes comuns: `agent_type` do arquivo de agente, sem `teammate_name`, sem `TeammateIdle`. Isso bate com a doc: "em modo não interativo com `-p`, o Claude não cria teammates".
+- **Em sessão interativa (sessão G), teammates in-process:**
+  - **Criação:** o chefe chama `Agent` com `name`. O `PostToolUse` chega **imediatamente** com `status: "teammate_spawned"`, `agent_id`, `name`, `color` (`green`, `blue`...), `agent_type` (o arquivo de agente, ex.: `ana-teste`), `team_name` (`session-<id>`), `teammate_id` (`ana@session-<id>`) e `tmux_pane_id: "in-process"`. Não precisa de heurística para ligar a chamada ao funcionário.
+  - **Nome em todos os eventos:** nos eventos do próprio teammate, `agent_type` é o **nome** (`ana`), não o arquivo de agente, e o `agent_id` começa com o nome (`aana-<hash>`). Diferente dos subagentes comuns.
+  - **Ciclo:** `SubagentStart` a cada mensagem que o teammate passa a tratar, `SubagentStop` quando termina o turno (com `last_assistant_message`) e logo em seguida `TeammateIdle`. O `Stop` do chefe lista os teammates ainda vivos em `background_tasks` (`type: "teammate"`).
+  - **Mensagens:** mesmos campos de `SendMessage` dos subagentes, e o `PostToolUse` ainda traz `routing` com `sender`, `senderColor`, `target`, `targetColor`, `summary` e `content`. É praticamente o balão pronto.
+  - **Desligamento:** o chefe manda `SendMessage` com `type: "shutdown_request"`, e cada teammate responde com `type: "shutdown_response"`, `approve: true`, para `team-lead`. Dá para animar o funcionário indo embora.
+  - **`ListAgents`:** o chefe usou essa ferramenta para acompanhar o time. A resposta lista também outras sessões do usuário na máquina, então o tradutor não deve repassá-la à interface.
 
 ### O que ficou sem teste
 
-- **Sessão interativa com time:** automatizei o `claude` interativo com `expect`, mas a tela "Is this a project you trust?" sempre fechou o programa (a opção padrão é "No, exit" e as teclas de seta não foram aceitas). Não marquei a pasta como confiável editando a configuração global do usuário. Ficou sem teste:
-  - payloads reais de `TeammateIdle` e `teammate_name` em `TaskCreated`/`TaskCompleted`;
-  - se teammates in-process trazem `agent_type`, e com qual valor;
-  - teammates em painel dividido (tmux/iTerm2): são processos separados, e não se sabe se os hooks deles chegam com outro `session_id` ou não chegam;
-  - se `SendMessage` entre teammates tem os mesmos campos que entre subagentes.
-- **Como fechar a lacuna:** uma sessão interativa manual, de poucos minutos, no projeto de teste (já confiável), com `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` e o mesmo `settings.json`. Dá pra fazer junto com o início da fase 1.
+- **Teammates em painel dividido (tmux/iTerm2):** são processos separados; não se sabe se os hooks chegam com outro `session_id`. Sem `tmux` na máquina de teste, o time rodou in-process.
+- **`TaskCreated`/`TaskCompleted` com `teammate_name`:** o time da sessão G não usou a lista de tarefas.
 - Também não testados: `Notification`, `PermissionDenied`, `StopFailure`, `PreCompact`/`PostCompact`, `Elicitation*`, `WorktreeCreate`/`WorktreeRemove`, `ConfigChange`, `CwdChanged`, `DirectoryAdded`, `Setup`, `UserPromptExpansion`, troca de modelo. Nenhum deles é essencial para o MVP.
 
 ## Plano B: transcrições
@@ -246,4 +251,27 @@ Tarefa:
 
 ```json
 {"hook_event_name":"TaskCreated","task_id":"1","task_subject":"cumprimentar","task_description":"..."}
+```
+
+Teammate criado (time de agentes):
+
+```json
+{"hook_event_name":"PostToolUse","tool_name":"Agent",
+ "tool_response":{"status":"teammate_spawned","agent_id":"aana-01","agent_type":"ana-teste","name":"ana","color":"green",
+                  "team_name":"session-0001","teammate_id":"ana@session-0001","tmux_pane_id":"in-process","model":"haiku"}}
+```
+
+Mensagem entre teammates:
+
+```json
+{"hook_event_name":"PostToolUse","tool_name":"SendMessage","agent_id":"aana-01","agent_type":"ana",
+ "tool_response":{"success":true,"message":"Message sent to bruno's inbox","msg_id":"msg-01",
+                  "routing":{"sender":"ana","senderColor":"green","target":"@bruno","targetColor":"blue",
+                             "summary":"Notify bruno that the oi append is done","content":"Finished appending \"oi\" to notes.txt..."}}}
+```
+
+Teammate ocioso:
+
+```json
+{"hook_event_name":"TeammateIdle","agent_id":"aana-01","agent_type":"ana","teammate_name":"ana","team_name":"session-0001"}
 ```
