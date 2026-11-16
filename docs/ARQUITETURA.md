@@ -115,9 +115,9 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 ## Integração com o Claude Code (hooks)
 
 - **Instalação:** o `termbay init` (ou `doctor --fix`) adiciona ao `.claude/settings.json` do projeto hooks que chamam `termbay hook <evento>`.
-- **Eventos de interesse:** início e fim de subagente, uso de ferramenta (antes e depois), notificações (aguardando o usuário) e fim da sessão.
-- **Conversa entre agentes:** subagentes comuns só reportam ao agente principal. Conversa de verdade entre funcionários depende do recurso de times do Claude Code, em que agentes trocam mensagens. **A validar** quanto disso aparece nos hooks (ver riscos).
-- **Fallback:** se faltar algum evento nos hooks, ler as transcrições da sessão em `~/.claude/projects/` em modo somente leitura.
+- **Eventos de interesse:** início e fim de subagente, uso de ferramenta (antes e depois), pedido de permissão, erros de ferramenta, tarefas e fim da sessão. Lista final e motivos em [FASE0-HOOKS.md](FASE0-HOOKS.md). Não registrar `MessageDisplay` (bloqueia a exibição do texto) nem `WorktreeCreate` (substitui o comportamento padrão).
+- **Conversa entre agentes:** toda mensagem passa pela ferramenta `SendMessage`, e o hook `PreToolUse` traz remetente, destinatário e texto completo. Funciona também entre subagentes nomeados, sem times (validado na fase 0, Claude Code 2.1.311). Times de verdade só existem em sessão interativa e ainda faltam testar.
+- **Fallback:** as transcrições da sessão em `~/.claude/projects/` (somente leitura) trazem o que os hooks não trazem: falas intermediárias dos subagentes e a mensagem recebida. Formato não documentado, então fica fora do MVP, como enriquecimento opcional.
 
 ## Recrutador automático
 
@@ -160,7 +160,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 ## Roteiro
 
-0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar.
+0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar. Feito com subagentes em 16/11/2026 ([FASE0-HOOKS.md](FASE0-HOOKS.md)); falta uma sessão interativa curta com times.
 1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela.
 2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões.
 3. **Recrutador:** `termbay init` com catálogo de cargos.
@@ -169,9 +169,9 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 ## Riscos e pontos em aberto
 
-- **Eventos dos hooks:** quanto da atividade dos agentes, principalmente das mensagens entre eles, os hooks expõem. É resolvido pela fase 0.
+- **Eventos dos hooks:** a fase 0 mostrou que os hooks cobrem ferramentas, subagentes e mensagens enviadas ([FASE0-HOOKS.md](FASE0-HOOKS.md)). Falta testar times de agentes numa sessão interativa (teammates in-process e em painel dividido, `TeammateIdle`), o que não dá pra fazer com `claude -p`.
 - **Termos da Anthropic:** confirmar que usar o `claude` oficial a partir de um app de terceiros é permitido com assinatura.
-- **Projetos parecidos:** pesquisar antes de publicar, pra se diferenciar ou contribuir.
+- **Projetos parecidos:** pesquisa feita em 16/11/2026, ver [PROJETOS-PARECIDOS.md](PROJETOS-PARECIDOS.md). O escritório sozinho já existe (Pixel Agents e outros); o diferencial é o terminal, o recrutador e a conversa entre agentes, e o nome pode confundir.
 - **Arte:** sprites próprios ou CC0. Nada de assets de jogos existentes.
 - **WebView no Linux:** o WebKitGTK varia entre distribuições, então é preciso testar cedo.
 
@@ -185,3 +185,4 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 | Escritório        | PixiJS 2D               | proposto |
 | Conta do Claude   | CLI oficial do usuário  | proposto |
 | Licença           | MIT                     | aceito (16/11/2026): simples, permissiva, compatível com o ECC |
+| Nome              | termbay                 | aceito (16/11/2026): substitui "officeAgents", que confundia com o Microsoft Office e com o projeto `office-agents`. Ver [PROJETOS-PARECIDOS.md](PROJETOS-PARECIDOS.md) |
