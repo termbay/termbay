@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "termbay",
+  "mainBinaryName": "termbay",
+  "identifier": "io.github.termbay.termbay",
+  "build": {
+    "frontendDist": "../../ui/dist",
+    "devUrl": "http://127.0.0.1:5173"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "termbay",
+        "width": 1000,
+        "height": 640,
+        "minWidth": 400,
+        "minHeight": 240
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost ws://127.0.0.1:5173; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "dangerousDisableAssetCspModification": ["style-src"],
+      "freezePrototype": false,
+      "capabilities": ["main"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis", "deb", "rpm"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Lightweight terminal with a 2D office for Claude agents",
+    "copyright": "Copyright (c) 2026 Guilherme Golfeto and termbay contributors. MIT License."
+  }
+}

@@ -1,0 +1,29 @@
+[package]
+name = "termbay"
+description = "termbay desktop app: a lightweight terminal with a 2D office for Claude agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+default-run = "termbay"
+
+[[bin]]
+name = "termbay"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+termbay-core.workspace = true
+tauri = { version = "2.12", features = [] }
+
+# Lets `termbay --version` (and later `termbay hook`) print to the console
+# it was started from, even though release builds use the GUI subsystem.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[lints]
+workspace = true

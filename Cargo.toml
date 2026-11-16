@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["core", "app/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/termbay/termbay"
+rust-version = "1.90"
+authors = ["Guilherme Golfeto"]
+
+[workspace.dependencies]
+termbay-core = { path = "core", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+
+# Size-focused release profile (decision D5 in docs/FASE1-PLANO.md).
+# `panic` stays at the default `unwind` so a panic in a pty thread does
+# not take down the whole window.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"

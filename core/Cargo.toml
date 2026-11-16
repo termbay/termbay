@@ -1,0 +1,19 @@
+[package]
+name = "termbay-core"
+description = "Core library of termbay: pty sessions and CLI parsing, without any UI dependency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+portable-pty = "0.9"
+
+# Used only to escalate to SIGKILL when a shell ignores SIGHUP.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

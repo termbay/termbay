@@ -4,4 +4,4 @@ Todo asset do termbay precisa ser **próprio** (feito para o projeto e licenciad
 
 | Arquivo | Autor | Origem | Licença |
 |---------|-------|--------|---------|
-| (nenhum ainda) | | | |
+| `app/src-tauri/icons/*` (ícone provisório do app: quadrado escuro com `>_`) | termbay (Guilherme Golfeto) | desenho próprio, gerado por script para a fase 1 | MIT |
