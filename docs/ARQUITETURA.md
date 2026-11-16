@@ -161,7 +161,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 ## Roteiro
 
 0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar. Feito em 16/11/2026 com subagentes e com um time in-process em sessão interativa ([FASE0-HOOKS.md](FASE0-HOOKS.md)).
-1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela.
+1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela. Plano, tarefas e decisões em [FASE1-PLANO.md](FASE1-PLANO.md).
 2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões.
 3. **Recrutador:** `termbay init` com catálogo de cargos.
 4. **Conversa entre agentes:** times do Claude Code nos balões.
@@ -174,15 +174,26 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 - **Projetos parecidos:** pesquisa feita em 16/11/2026, ver [PROJETOS-PARECIDOS.md](PROJETOS-PARECIDOS.md). O escritório sozinho já existe (Pixel Agents e outros); o diferencial é o terminal, o recrutador e a conversa entre agentes, e o nome pode confundir.
 - **Arte:** sprites próprios ou CC0. Nada de assets de jogos existentes.
 - **WebView no Linux:** o WebKitGTK varia entre distribuições, então é preciso testar cedo.
+- **Licenças dentro do Tauri:** alguns crates do Tauri parecem usar MPL-2.0, que não está na lista do `CLAUDE.md`. Confirmar com `cargo deny` no primeiro build (ver D10 em [FASE1-PLANO.md](FASE1-PLANO.md)).
 
 ## Decisões
 
 | Decisão           | Escolha                 | Status   |
 |-------------------|-------------------------|----------|
-| Desktop           | Tauri + modo navegador  | proposto |
-| Core              | Rust                    | proposto |
-| Terminal          | xterm.js + portable-pty | proposto |
+| Desktop           | Tauri + modo navegador  | aceito (16/11/2026) |
+| Core              | Rust                    | aceito (16/11/2026) |
+| Terminal          | xterm.js + portable-pty | aceito (16/11/2026) |
 | Escritório        | PixiJS 2D               | proposto |
 | Conta do Claude   | CLI oficial do usuário  | proposto |
 | Licença           | MIT                     | aceito (16/11/2026): simples, permissiva, compatível com o ECC |
 | Nome              | termbay                 | aceito (16/11/2026): substitui "officeAgents", que confundia com o Microsoft Office e com o projeto `office-agents`. Ver [PROJETOS-PARECIDOS.md](PROJETOS-PARECIDOS.md) |
+| Versão do Tauri   | 2.x, minor estável fixada | aceito (16/11/2026): `Channel` para streaming e capabilities nos três sistemas (D1) |
+| Frontend          | TypeScript puro, sem framework | aceito (16/11/2026): abas e divisão são pouca interface; menos peso e menos dependências (D2) |
+| Node              | só no build (Vite, npm com lockfile) | aceito (16/11/2026): xterm.js vem do npm; o binário embute arquivos estáticos e roda sem Node (D3) |
+| xterm.js          | `@xterm/*` empacotado pelo Vite, WebGL com volta ao DOM | aceito (16/11/2026): WebGL é o mais rápido; DOM cobre WebViews sem WebGL (D4) |
+| Pastas e Cargo    | workspace: `core/` (lib sem Tauri), `app/src-tauri/` (binário `termbay`), `ui/` | aceito (16/11/2026): core testável e reutilizável no `serve` e nos hooks (D5) |
+| Pty ↔ UI          | comandos Tauri + um `Channel` binário por pty, com controle de fluxo | aceito (16/11/2026): ordenado e sem JSON/base64 na saída (D6) |
+| Modo navegador    | fora da fase 1; entra com o servidor de eventos | aceito (16/11/2026): usa o mesmo servidor local com token; não abrir porta só para isso (D7) |
+| Config do usuário | `~/.termbay/config.toml` (`TERMBAY_CONFIG`) | aceito (16/11/2026): mesmo caminho nos três sistemas; inválido nunca impede de abrir (D8) |
+| Plataformas mínimas | macOS 10.15+, Windows 10 1809+, Linux com webkit2gtk-4.1 | aceito (16/11/2026): mínimos do Tauri 2 e do ConPTY; AppImage fora por tamanho (D9) |
+| Licenças das deps | `cargo-deny` + checagem npm; MPL-2.0 só por exceção por crate | aceito (16/11/2026): MPL vem do Tauri e precisa de aceite explícito (D10) |
