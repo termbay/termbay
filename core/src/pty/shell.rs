@@ -111,13 +111,17 @@ fn pick_windows_shell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::collections::HashSet;
 
+    #[cfg(unix)]
     fn existing(paths: &[&str]) -> impl Fn(&Path) -> bool {
         let set: HashSet<PathBuf> = paths.iter().map(PathBuf::from).collect();
         move |p: &Path| set.contains(p)
     }
 
+    // Path::is_absolute is platform specific: "/bin/zsh" is not absolute on Windows.
+    #[cfg(unix)]
     #[test]
     fn unix_uses_shell_env_when_it_exists() {
         let shell = pick_unix_shell(
@@ -128,12 +132,14 @@ mod tests {
         assert_eq!(shell, ShellSpec::new("/usr/local/bin/fish"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn macos_starts_a_login_shell() {
         let shell = pick_unix_shell(Some("/bin/zsh".into()), true, existing(&["/bin/zsh"]));
         assert_eq!(shell, ShellSpec::new("/bin/zsh").arg("-l"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn unix_ignores_missing_or_relative_shell_env() {
         let exists = existing(&["/bin/bash", "/bin/sh"]);
@@ -155,12 +161,14 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn macos_falls_back_to_zsh() {
         let shell = pick_unix_shell(None, true, existing(&["/bin/zsh", "/bin/bash", "/bin/sh"]));
         assert_eq!(shell, ShellSpec::new("/bin/zsh").arg("-l"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn unix_last_resort_is_sh() {
         let shell = pick_unix_shell(None, false, existing(&[]));
