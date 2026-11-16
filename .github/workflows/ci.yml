@@ -1,0 +1,270 @@
+# Continuous integration for termbay (phase 1, tasks T3, T4 and the CI part of T5).
+#
+# Jobs:
+#   test      lint and tests (Rust + UI) on macOS, Linux and Windows
+#   bundle    release build with the Tauri CLI, packages from decision D9,
+#             size report in the job summary, fails above SIZE_LIMIT_MB
+#   licenses  cargo-deny licenses, bans and sources, plus the npm license check
+#   advisories  cargo-deny security advisories (separate check)
+#
+# Third-party actions are pinned to a full commit SHA (the tag is in the
+# comment). Only actions with a permissive license are used:
+#   actions/checkout (MIT), actions/setup-node (MIT), actions/cache (MIT),
+#   EmbarkStudios/cargo-deny-action (Apache-2.0).
+# The Rust toolchain comes from the rustup already installed on the runners.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  # Size limit per artifact, in MB (1 MB = 1,000,000 bytes). See scripts/check-size.sh.
+  SIZE_LIMIT_MB: "20"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-22.04, windows-latest]
+    steps:
+      - name: Keep LF line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies (Tauri 2, webkit2gtk-4.1)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Rust toolchain
+        id: rust
+        run: |
+          # Uses rust-toolchain.toml if the repository has one, otherwise stable.
+          if [[ -f rust-toolchain.toml || -f rust-toolchain ]]; then
+            rustup show active-toolchain || rustup toolchain install
+          else
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustup component add clippy rustfmt
+          rustc --version
+          echo "rustc=$(rustc --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-test-${{ runner.os }}-${{ steps.rust.outputs.rustc }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-test-${{ runner.os }}-${{ steps.rust.outputs.rustc }}-
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: npm ci
+        working-directory: ui
+        run: npm ci
+
+      - name: npm run lint
+        working-directory: ui
+        run: npm run lint
+
+      - name: npm test
+        working-directory: ui
+        run: npm test
+
+      # The Tauri crate embeds ui/dist at compile time, so the UI must be built
+      # before clippy and cargo test compile it.
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --locked
+
+  bundle:
+    name: bundle and size (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Packages from decision D9 (no AppImage: it embeds WebKitGTK and goes over 20 MB).
+          - os: macos-latest
+            bundles: app,dmg
+            binary: target/release/termbay
+          - os: ubuntu-22.04
+            bundles: deb,rpm
+            binary: target/release/termbay
+          - os: windows-latest
+            bundles: nsis
+            binary: target/release/termbay.exe
+    steps:
+      - name: Keep LF line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies (Tauri 2, webkit2gtk-4.1)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install Rust toolchain
+        id: rust
+        run: |
+          if [[ -f rust-toolchain.toml || -f rust-toolchain ]]; then
+            rustup show active-toolchain || rustup toolchain install
+          else
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustc --version
+          echo "rustc=$(rustc --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-release-${{ runner.os }}-${{ steps.rust.outputs.rustc }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-release-${{ runner.os }}-${{ steps.rust.outputs.rustc }}-
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: npm ci
+        working-directory: ui
+        run: npm ci
+
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+
+      # Unsigned packages, only to measure and test (signing comes later).
+      # Run from the repository root: the Tauri CLI finds app/src-tauri/tauri.conf.json.
+      - name: tauri build
+        run: ui/node_modules/.bin/tauri build --ci --bundles "${{ matrix.bundles }}"
+
+      - name: Check artifact sizes
+        run: |
+          shopt -s nullglob
+          artifacts=("${{ matrix.binary }}")
+          case "${{ runner.os }}" in
+            macOS)   artifacts+=(target/release/bundle/macos/*.app target/release/bundle/dmg/*.dmg) ;;
+            Linux)   artifacts+=(target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm) ;;
+            Windows) artifacts+=(target/release/bundle/nsis/*-setup.exe) ;;
+          esac
+          expected=$(( $(tr ',' '\n' <<<"${{ matrix.bundles }}" | wc -l) + 1 ))
+          if [[ ${#artifacts[@]} -lt $expected ]]; then
+            echo "error: expected $expected artifacts, found ${#artifacts[@]}: ${artifacts[*]}" >&2
+            ls -R target/release/bundle >&2 || true
+            exit 2
+          fi
+          bash scripts/check-size.sh --title "Sizes on ${{ runner.os }}" "${artifacts[@]}"
+
+  licenses:
+    name: licenses
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: cargo deny check licenses bans sources
+        uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+        with:
+          command: check
+          command-arguments: licenses bans sources
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: test npm license checker
+        run: node --test "scripts/*.test.mjs"
+
+      - name: npm ci
+        working-directory: ui
+        run: npm ci
+
+      # Script defined by the license check (D10, task T5) in ui/package.json.
+      - name: npm run licenses
+        working-directory: ui
+        run: npm run licenses
+
+  # Kept apart from the license job so a newly published advisory does not
+  # turn unrelated pull requests red without being visible as its own check.
+  advisories:
+    name: advisories
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: cargo deny check advisories
+        uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+        with:
+          command: check
+          command-arguments: advisories

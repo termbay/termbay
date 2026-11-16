@@ -22,9 +22,41 @@ Ao participar, você concorda com o nosso [Código de Conduta](CODE_OF_CONDUCT.m
 
 O termbay é licenciado sob a [MIT](LICENSE). Ao enviar uma contribuição, você concorda que ela seja distribuída sob essa licença.
 
-- **Dependências:** só com licença permissiva compatível com MIT (MIT, Apache-2.0, BSD, ISC, Zlib, CC0). GPL, AGPL e licenças proprietárias não são aceitas.
+- **Dependências:** só com licença permissiva compatível com MIT. Detalhes logo abaixo.
 - **Código de outros projetos:** mantenha o aviso de licença original e adicione uma entrada em [CREDITS.md](CREDITS.md).
 - **Arte (sprites, sons, fontes):** precisa ser sua ou CC0, com a origem registrada em [assets/CREDITS.md](assets/CREDITS.md). Não aceitamos assets, personagens ou cenários de jogos existentes.
+
+### Licenças das dependências
+
+A CI confere a licença de toda dependência, direta ou indireta, em Rust e no npm. Se alguma não estiver na lista, o PR fica vermelho.
+
+**Permitidas:** MIT, Apache-2.0 (também com `WITH LLVM-exception`), BSD-2-Clause, BSD-3-Clause, ISC, Zlib, CC0-1.0, Unicode-3.0 e 0BSD. Quando o pacote oferece uma escolha (`MIT OR GPL-3.0`), basta que uma das opções esteja na lista.
+
+**Não aceitas:** GPL, AGPL, LGPL, SSPL, EUPL e outras copyleft fortes, licenças proprietárias, pacotes sem licença e licenças fora do padrão SPDX ("SEE LICENSE IN ..."). Se precisar de algo assim, abra uma issue: quase sempre existe uma alternativa permissiva.
+
+**Exceções (MPL-2.0):** a MPL-2.0 é copyleft fraco, por arquivo. Ela só entra **por exceção, pacote a pacote**, nunca liberada para todos, e só para pacotes que usamos sem modificar. Hoje as exceções são crates trazidos pelo próprio Tauri (`cssparser`, `cssparser-macros`, `selectors`, `dtoa-short` e `option-ext`). Cada uma tem o motivo escrito em [`deny.toml`](deny.toml).
+
+**Para pedir uma exceção:**
+
+1. Abra um PR que adiciona a dependência e a exceção:
+   - Rust: uma linha em `exceptions` no [`deny.toml`](deny.toml), com `crate` e `allow`, e um comentário dizendo de onde o crate vem e para que serve.
+   - npm: um item em `exceptions` no [`scripts/npm-license-policy.json`](scripts/npm-license-policy.json), com `package`, `license` e `reason`. Use `"devOnly": true` se ele só roda no build: a checagem falha se ele virar dependência de tempo de execução.
+2. Explique no PR por que não há alternativa permissiva e confirme que o código não será modificado.
+3. Uma pessoa mantenedora revisa antes do merge.
+
+**Para rodar a checagem na sua máquina:**
+
+```sh
+# Rust (cargo-deny é só ferramenta de desenvolvimento)
+cargo install --locked cargo-deny
+cargo deny check
+
+# npm (Node puro, sem dependência extra)
+cd ui && npm run licenses
+
+# testes do verificador do npm
+node --test "scripts/*.test.mjs"
+```
 
 ## Fluxo
 

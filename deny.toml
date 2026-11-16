@@ -1,0 +1,113 @@
+# cargo-deny configuration for termbay.
+# Docs: https://embarkstudios.github.io/cargo-deny/
+#
+# Run locally (cargo-deny is a dev tool, not a dependency of termbay):
+#   cargo install --locked cargo-deny
+#   cargo deny check
+#
+# The license policy is explained in CONTRIBUTING.md ("Licenças das dependências").
+# termbay is MIT. Every dependency must be permissive and compatible with MIT.
+
+[graph]
+# Check the dependency graph of every platform we ship (macOS, Linux, Windows),
+# not only the one running the check. Leaving `targets` empty means "all targets".
+all-features = false
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# Licenses
+# ---------------------------------------------------------------------------
+[licenses]
+# Anything NOT listed here is denied. That covers strong copyleft (GPL, AGPL,
+# LGPL, SSPL, EUPL...), proprietary and unknown licenses. A crate with an
+# `A OR B` expression passes if at least one side is allowed.
+allow = [
+    # The list from CLAUDE.md.
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    # Additions beyond CLAUDE.md, all permissive and MIT-compatible:
+    # - Apache-2.0 plus an exception that only removes obligations
+    #   (used by target-lexicon, pulled in by the Tauri build).
+    "Apache-2.0 WITH LLVM-exception",
+    # - Unicode data license, permissive with attribution (icu_* crates, used
+    #   by url/idna in Tauri; unicode-ident).
+    "Unicode-3.0",
+    # - Zero-clause BSD: like ISC without the attribution requirement.
+    "0BSD",
+]
+# The list is a policy, not an inventory: do not warn about entries that no
+# crate uses today.
+unused-allowed-license = "allow"
+# How sure cargo-deny must be when it reads a license text instead of an SPDX field.
+confidence-threshold = 0.93
+
+# MPL-2.0 is weak, file-level copyleft. Shipping it inside an MIT app is fine
+# as long as we do not modify those files (and we do not vendor or patch them).
+# It is NOT allowed globally: each crate needs its own entry here, with the
+# reason, accepted in a pull request reviewed by the maintainers (decision D10
+# in docs/FASE1-PLANO.md). Crate names are pinned without a version so that
+# routine updates of the same crate keep working; a new MPL crate fails CI.
+#
+# Confirmed against the Tauri 2.12 dependency graph (all targets), 16/11/2026.
+# Re-check with `cargo tree --target all -i <crate>` when Tauri is updated and
+# remove entries that are no longer used.
+exceptions = [
+    # CSS parser from Servo. Pulled in by dom_query, used by tauri-utils
+    # (build time: tauri-build / tauri-codegen inject CSP and scripts into the
+    # HTML) and by wry (runtime, HTML handling in the webview layer).
+    { crate = "cssparser", allow = ["MPL-2.0"] },
+    # Proc-macro helper of cssparser (build time only).
+    { crate = "cssparser-macros", allow = ["MPL-2.0"] },
+    # CSS selector matching from Servo, same path as cssparser (dom_query).
+    { crate = "selectors", allow = ["MPL-2.0"] },
+    # Short float formatting used by cssparser.
+    { crate = "dtoa-short", allow = ["MPL-2.0"] },
+    # Tiny Option helper used by dirs-sys -> dirs, which Tauri, tauri-build
+    # and wry use to find the user's config/data directories.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[licenses.private]
+# Our own workspace crates (publish = false) are MIT but not published;
+# do not require them to pass the registry license check.
+ignore = true
+
+# ---------------------------------------------------------------------------
+# Banned crates and duplicates
+# ---------------------------------------------------------------------------
+[bans]
+# Tauri pulls in some crates in two versions; report, do not fail.
+multiple-versions = "warn"
+# No `*` version requirements. Path dependencies inside the workspace are fine.
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = []
+
+# ---------------------------------------------------------------------------
+# Security advisories (RustSec)
+# ---------------------------------------------------------------------------
+[advisories]
+# Vulnerabilities fail at any depth. "Unmaintained" notices fail only for crates
+# we depend on directly: Tauri's Linux stack (gtk-rs 0.18 -> glib-macros ->
+# proc-macro-error, RUSTSEC-2024-0370) carries unmaintained crates we cannot
+# replace ourselves. Felipe (felipe-qa) reviews these when Tauri is updated.
+unmaintained = "workspace"
+# Ignoring an advisory requires an entry like
+# { id = "RUSTSEC-XXXX-XXXX", reason = "why it does not affect us" }.
+ignore = []
+
+# ---------------------------------------------------------------------------
+# Where crates may come from
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
