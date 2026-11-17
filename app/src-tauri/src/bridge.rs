@@ -726,8 +726,21 @@ mod tests {
             false,
             &mut output,
         );
+        ctrl_c_stops_the_flood(&bridge, id, &rx, &mut queries, &mut output);
+        bridge.close(id).unwrap();
+    }
+
+    /// Sends Ctrl+C to a flooding shell and acks everything from then on:
+    /// the flood must stop and the shell must answer a typed line.
+    fn ctrl_c_stops_the_flood(
+        bridge: &PtyBridge,
+        id: u32,
+        rx: &Receiver<Seen>,
+        queries: &mut CursorQueries,
+        output: &mut Vec<u8>,
+    ) {
         bridge.write(id, b"\x03".to_vec()).unwrap();
-        // What was received while not acking is confirmed now.
+        // What was received while not acking (if anything) is confirmed now.
         bridge.ack(id, u64::MAX);
         // First the flood must stop: the output goes quiet once ConPTY has
         // repainted the screen and cmd printed its prompt. Typing the marker
@@ -747,10 +760,10 @@ mod tests {
             assert!(
                 started.elapsed() < limit,
                 "the flood did not stop after Ctrl+C within {limit:?}; output tail: {:?}",
-                tail(&output)
+                tail(output)
             );
             let window = Duration::from_millis(100);
-            let n = pump(&bridge, id, &rx, &mut queries, window, true, &mut output);
+            let n = pump(bridge, id, rx, queries, window, true, output);
             quiet = if n == 0 {
                 quiet + window
             } else {
@@ -761,22 +774,45 @@ mod tests {
         bridge.write(id, echo_marker().to_vec()).unwrap();
         let limit = Duration::from_secs(if cfg!(windows) { 5 } else { 1 });
         let started = Instant::now();
-        while !String::from_utf8_lossy(&output).contains("ABCD") {
+        while !String::from_utf8_lossy(output).contains("ABCD") {
             assert!(
                 started.elapsed() < limit,
                 "the shell did not answer within {limit:?} after the flood stopped; output tail: {:?}",
-                tail(&output)
+                tail(output)
             );
             pump(
-                &bridge,
+                bridge,
                 id,
-                &rx,
-                &mut queries,
+                rx,
+                queries,
                 Duration::from_millis(20),
                 true,
-                &mut output,
+                output,
             );
         }
+    }
+
+    #[test]
+    fn ctrl_c_stops_a_flood_that_was_never_paused() {
+        // Same as the end of the flow control test, but acking all along,
+        // so the reader never pauses: on Windows this tells a Ctrl+C that
+        // never reaches the program apart from one stuck behind a paused
+        // reader (ConPTY handles input and output under one lock).
+        let bridge = PtyBridge::with_options(plain_shell());
+        let (id, rx) = open(&bridge);
+        let mut queries = CursorQueries::default();
+        let mut output = Vec::new();
+        bridge.write(id, flood_command().to_vec()).unwrap();
+        let mut total = 0;
+        let started = Instant::now();
+        while total < 256 * 1024 {
+            assert!(started.elapsed() < 2 * TIMEOUT, "the flood did not start");
+            let window = Duration::from_millis(100);
+            total += pump(&bridge, id, &rx, &mut queries, window, true, &mut output);
+        }
+        let flow = lock(&bridge.flows).get(&id).cloned().unwrap();
+        assert!(!flow.gate.is_paused(), "the reader paused while acking");
+        ctrl_c_stops_the_flood(&bridge, id, &rx, &mut queries, &mut output);
         bridge.close(id).unwrap();
     }
 

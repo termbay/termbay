@@ -338,6 +338,48 @@ fn exit_code_is_reported() {
     assert!(!session.is_running());
 }
 
+/// Ctrl+C (`\x03`) interrupts a program that is waiting, with no flood
+/// and no flow control involved. On Windows it fails when the shell
+/// inherits "ignore Ctrl+C" from the process that started it.
+#[test]
+fn ctrl_c_interrupts_a_waiting_program() {
+    let (session, mut rec) = spawn(plain_shell());
+    let (waiting, marker): (&[u8], &[u8]) = if cfg!(windows) {
+        (
+            b"powershell -NoProfile -Command \"'WAIT'+'ING'; Start-Sleep 60\"\r",
+            b"echo AB^CD\r",
+        )
+    } else {
+        // Printed by the program itself, so it already handles SIGINT when
+        // the marker shows up (the shell's own child could still be between
+        // fork and exec, ignoring it).
+        (
+            b"sh -c 'echo WAIT\"\"ING; exec sleep 60'\r",
+            b"echo AB\"\"CD\r",
+        )
+    };
+    session.write(waiting).unwrap();
+    rec.expect_output("WAITING");
+    session.write(b"\x03").unwrap();
+    // Typed again each second: a line typed while the program is still
+    // exiting may be discarded (PowerShell does), which is not the bug.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut typed = Instant::now();
+    session.write(marker).unwrap();
+    while !rec.output_text().contains("ABCD") {
+        assert!(
+            Instant::now() < deadline,
+            "Ctrl+C did not interrupt the program; output:\n{}",
+            rec.output_text()
+        );
+        if typed.elapsed() >= Duration::from_secs(1) {
+            session.write(marker).unwrap();
+            typed = Instant::now();
+        }
+        rec.pump(Duration::from_millis(50));
+    }
+}
+
 #[test]
 fn clean_exit_is_success() {
     let (session, mut rec) = spawn(plain_shell());

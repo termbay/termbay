@@ -216,6 +216,8 @@ impl PtySession {
             cmd.env(key, value);
         }
 
+        #[cfg(windows)]
+        allow_ctrl_c_in_children();
         let mut child = pair
             .slave
             .spawn_command(cmd)
@@ -521,6 +523,29 @@ fn finish(shared: &Shared, sink: &Mutex<Sink>, done: &mpsc::Receiver<()>, status
     // released right after the last event.
     let mut callback = std::mem::replace(&mut sink.callback, Box::new(|_| {}));
     callback(PtyEvent::Exit(status));
+}
+
+/// Makes the shells started from now on handle Ctrl+C.
+///
+/// On Windows, "ignore Ctrl+C" is a process attribute inherited by child
+/// processes (`SetConsoleCtrlHandler(NULL, TRUE)`, or a parent started with
+/// `CREATE_NEW_PROCESS_GROUP`, as some launchers and CI runners do). A shell
+/// that inherits it, and every program it starts, never sees the
+/// `CTRL_C_EVENT` that ConPTY raises when the user types Ctrl+C (`\x03`),
+/// so nothing can be interrupted. Clearing the attribute in our own process
+/// before each spawn gives the shell the default behaviour, as in a fresh
+/// console window. termbay has no console of its own (it is a GUI app), so
+/// this changes nothing else for it; under a console (tests, the CLI),
+/// Ctrl+C there ends the process, which is the default anyway.
+#[cfg(windows)]
+fn allow_ctrl_c_in_children() {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    // SAFETY: no handler routine is passed; with `NULL` and `FALSE` the call
+    // only clears the "ignore Ctrl+C" flag of the current process. A failure
+    // leaves things as they were, so the result is ignored.
+    unsafe {
+        SetConsoleCtrlHandler(None, 0);
+    }
 }
 
 fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

@@ -22,10 +22,11 @@ toml = { version = "1", default-features = false, features = ["std", "parse", "s
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Lists the children of the shell for `pty_info` (busy / foreground). Same
-# crate and version as the app's; MIT OR Apache-2.0.
+# Lists the children of the shell for `pty_info` (busy / foreground) and
+# lets shells inherit Ctrl+C handling. Same crate and version as the app's;
+# MIT OR Apache-2.0.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp"] }
 
 [lints]
 workspace = true
