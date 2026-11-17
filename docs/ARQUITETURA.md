@@ -149,7 +149,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 |------|----------|
 | 1    | abas, divisão de tela, temas, histórico, busca, configuração em arquivo |
 | 2    | blocos (comando e saída agrupados, como no Warp) via integração com o shell (OSC 133), paleta de comandos |
-| 3    | autocompletar visual, atalho "mandar este erro pro Claude" |
+| 3    | autocompletar visual (desenho e proposta de antecipar para a fase 1b em [AUTOCOMPLETE.md](AUTOCOMPLETE.md)), atalho "mandar este erro pro Claude" |
 
 ## Metas de leveza
 
@@ -162,6 +162,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 
 0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar. Feito em 16/11/2026 com subagentes e com um time in-process em sessão interativa ([FASE0-HOOKS.md](FASE0-HOOKS.md)).
 1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela. Plano, tarefas e decisões em [FASE1-PLANO.md](FASE1-PLANO.md).
+   - **Autocompletar (marco A em andamento, logo depois do marco 1):** menu de sugestões do próprio shell, via integração com o shell (OSC 133 + OSC privado), base também dos blocos da fase 5. Desenho, tarefas e decisões em [AUTOCOMPLETE.md](AUTOCOMPLETE.md).
 2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões.
 3. **Recrutador:** `termbay init` com catálogo de cargos.
 4. **Conversa entre agentes:** times do Claude Code nos balões.
@@ -197,3 +198,10 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 | Config do usuário | `~/.termbay/config.toml` (`TERMBAY_CONFIG`) | aceito (16/11/2026): mesmo caminho nos três sistemas; inválido nunca impede de abrir (D8) |
 | Plataformas mínimas | macOS 10.15+, Windows 10 1809+, Linux com webkit2gtk-4.1 | aceito (16/11/2026): mínimos do Tauri 2 e do ConPTY; AppImage fora por tamanho (D9) |
 | Licenças das deps | `cargo-deny` + checagem npm; MPL-2.0 só por exceção por crate | aceito (16/11/2026): MPL vem do Tauri e precisa de aceite explícito (D10) |
+| Autocompletar: roteiro | marco A logo depois do marco 1 da fase 1, antes das abas | aceito (16/11/2026): pedido do Guilherme; a config mínima do `[autocomplete]` entra junto e a T14 a absorve depois. Recomendação original era a fase 1b (D11, [AUTOCOMPLETE.md](AUTOCOMPLETE.md)) |
+| Integração com o shell | OSC 133 + OSC 7 + OSC privado com nonce, injetado sem editar arquivos do usuário | aceito (16/11/2026): padrões que os blocos vão usar, mais estado confiável que programas e shells remotos não forjam (D12) |
+| Fonte das sugestões | o próprio shell da aba (widget em tecla privada) + histórico só leitura; catálogo depois | aceito (16/11/2026): contexto exato da sessão, sem processo extra e custo zero parado (D13) |
+| Gatilho do autocompletar | Tab abre o menu; Enter insere e nunca executa; abrir enquanto digita só com fontes inertes | aceito (16/11/2026): completions do shell executam código e podem travar o prompt (D14) |
+| Autocompletar por padrão | desligado no marco A, ligado a partir do marco B | aceito (16/11/2026): injetar no shell pode quebrar configurações; ligar só depois dos quatro shells testados (D15) |
+| Autocompletar: onde mora | parser OSC e motor no core (só com integração), menu na UI, `pty_complete` + evento `pty-shell` | aceito (16/11/2026): core testável sem Tauri e UI sem lógica de shell (D16) |
+| Autocompletar: plataformas | marco A só fish e zsh; bash e PowerShell no marco B | aceito (16/11/2026): exceção temporária ao multiplataforma para entregar cedo, fechada antes de ligar por padrão (D17) |
