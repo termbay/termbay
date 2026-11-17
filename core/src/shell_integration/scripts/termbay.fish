@@ -98,9 +98,14 @@ if set -q TERMBAY_NONCE[1]; and status is-interactive
         if test "$fish_bind_mode" != insert -a "$fish_bind_mode" != default
             set mode command
         else if test "$fish_bind_mode" = default
-            # "default" is vi normal mode when the vi bindings are in use,
-            # that is, when the insert mode has bindings other than ours.
-            if bind -M insert 2>/dev/null | string match -q -v -- '*__termbay_*'
+            # "default" is vi normal mode when the vi bindings are in use.
+            # Ask fish which bindings are active; only for custom binding
+            # functions fall back to looking for other insert mode bindings
+            # (fish 4.9 defines insert mode bindings even for emacs).
+            if string match -q -- '*vi*' $fish_key_bindings
+                set mode command
+            else if test "$fish_key_bindings" != fish_default_key_bindings
+                and bind -M insert 2>/dev/null | string match -q -v -- '*__termbay_*'
                 set mode command
             end
         end
