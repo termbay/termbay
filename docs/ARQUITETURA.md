@@ -205,3 +205,13 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 | Autocompletar por padrão | desligado no marco A, ligado a partir do marco B | aceito (16/11/2026): injetar no shell pode quebrar configurações; ligar só depois dos quatro shells testados (D15) |
 | Autocompletar: onde mora | parser OSC e motor no core (só com integração), menu na UI, `pty_complete` + evento `pty-shell` | aceito (16/11/2026): core testável sem Tauri e UI sem lógica de shell (D16) |
 | Autocompletar: plataformas | marco A só fish e zsh; bash e PowerShell no marco B | aceito (16/11/2026): exceção temporária ao multiplataforma para entregar cedo, fechada antes de ligar por padrão (D17) |
+| CSP dos estilos | `dangerousDisableAssetCspModification: ["style-src"]` | aceito (16/11/2026, em vigor desde o marco 1): o nonce do Tauri anularia o `'unsafe-inline'` de que o xterm.js precisa; os scripts seguem protegidos por hash (P7 em [SEGURANCA.md](SEGURANCA.md)) |
+| Limite de painéis | sem limite de abas; teto de 64 ptys no core | aceito (16/11/2026): cada pty custa um processo e quatro threads; o teto só barra acidentes (D18, [FASE1-PLANO.md](FASE1-PLANO.md) seção 6) |
+| Última aba | fechar a última aba encerra o app nos três sistemas | aceito (16/11/2026): uma janela só na fase 1; ficar aberto sem janela no macOS não traz ganho (D19) |
+| Shell que sai | código 0 fecha o painel; outro código mantém com aviso | aceito (16/11/2026): sair de propósito não deixa lixo, e um erro ao abrir continua legível (D20) |
+| Confirmar ao fechar | painel ou aba com programa rodando pede confirmação; janela no marco 3 | aceito (16/11/2026): protege `npm run dev` e `ssh` de um Cmd+W por engano, sem plugin de diálogo (D21) |
+| Config no marco 2 | só `get_config` com o `[autocomplete]`; T14 completa no marco 3 | aceito (16/11/2026): corrige o `trigger` ignorado pela UI sem antecipar a config inteira (D22) |
+| Diretório de painéis novos | herdado do processo do shell (`pty_info`), nunca do OSC 7 | aceito (16/11/2026): o OSC 7 pode ser forjado pela saída; o sistema operacional não (D23) |
+| Atalhos | Cmd no macOS, Ctrl+Shift no Linux e no Windows, handler global antes do xterm.js, menu próprio no macOS | aceito (16/11/2026): coerente com o copiar/colar e sem tomar teclas do shell (D24) |
+| Controle de fluxo | 512 KiB para pausar, 128 KiB para retomar, por pty, contados antes do agrupador | aceito (16/11/2026): detalha a D6; Ctrl+C abaixo de 1 s com vários painéis e memória limitada (D25) |
+| Divisão de tela | árvore binária meio a meio; escritório fora da árvore | aceito (16/11/2026): o mais simples que cobre o marco 2 (D26) |
