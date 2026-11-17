@@ -194,6 +194,9 @@ jobs:
     env:
       TERMBAY_E2E_CONFIG: ${{ github.workspace }}/e2e-config.toml
       TERMBAY_CONFIG: ${{ github.workspace }}/e2e-config.toml
+      # Startup log of the e2e app (command line, WebView2 variables,
+      # panics), printed when the job fails.
+      TERMBAY_E2E_LOG: ${{ github.workspace }}/e2e-app.log
     steps:
       - name: Keep LF line endings on Windows
         if: runner.os == 'Windows'
@@ -296,6 +299,24 @@ jobs:
           tauri-driver "${driver_args[@]}" &
           sleep 3
           cd ui && npm run e2e
+
+      # Why a WebDriver session failed: the driver does not forward the
+      # app's stderr, so show the app's own log and the WebView2 data
+      # directories (DevToolsActivePort is written there).
+      - name: e2e diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          echo "--- e2e app log"
+          cat "$TERMBAY_E2E_LOG" 2>/dev/null || echo "(no log: the app never started)"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "--- app data directory"
+            ls -laR "$LOCALAPPDATA/io.github.termbay.termbay" 2>/dev/null | head -50 || true
+            echo "--- msedgedriver user data directories"
+            find "$TEMP" -maxdepth 2 -iname 'scoped_dir*' 2>/dev/null | head -20 || true
+            find "$TEMP" -maxdepth 4 -name DevToolsActivePort 2>/dev/null || true
+            tasklist | grep -i -E 'termbay|msedge' || true
+          fi
 
       # P8: autocomplete in the whole app, with zsh and with fish as the login shell.
       - name: e2e autocomplete (zsh and fish)

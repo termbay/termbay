@@ -23,9 +23,11 @@ mod menu;
 mod security_tests;
 
 fn main() -> ExitCode {
+    e2e_log::start();
     let command = match parse_command(std::env::args_os().skip(1), launched_by_webview_driver()) {
         Ok(command) => command,
         Err(err) => {
+            e2e_log::write(&format!("command line rejected: {err}"));
             console::attach_to_parent();
             let _ = writeln!(std::io::stderr(), "termbay: {err}");
             return ExitCode::from(u8::try_from(err.exit_code()).unwrap_or(2));
@@ -39,14 +41,22 @@ fn main() -> ExitCode {
     }
 }
 
-/// Variable that `msedgedriver` sets when it starts the app for the e2e
-/// tests, together with browser options in the command line.
+/// Variable that `msedgedriver` may set when it starts the app for the e2e
+/// tests.
 const WEBVIEW_DRIVER_ENV: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
 
 /// Only e2e builds (`--features e2e`) started by the WebView2 driver
-/// tolerate unknown options; release builds always reject them.
+/// tolerate unknown options; release builds always reject them. The driver
+/// is recognised by its variable or by the DevTools option it puts in the
+/// command line, since not every `msedgedriver` version sets the variable.
 fn launched_by_webview_driver() -> bool {
-    cfg!(feature = "e2e") && std::env::var_os(WEBVIEW_DRIVER_ENV).is_some()
+    cfg!(feature = "e2e")
+        && (std::env::var_os(WEBVIEW_DRIVER_ENV).is_some()
+            || std::env::args_os().any(|arg| is_driver_option(&arg)))
+}
+
+fn is_driver_option(arg: &std::ffi::OsStr) -> bool {
+    arg.to_string_lossy().starts_with("--remote-debugging-")
 }
 
 /// [`cli::parse`], except that with `driver` set the browser options the
@@ -73,6 +83,7 @@ fn print_and_exit(text: &str) -> ExitCode {
 fn run_app() -> ExitCode {
     let builder = tauri::Builder::default().setup(|app| {
         disable_browser_keys(app);
+        e2e_log::write("setup finished");
         Ok(())
     });
     // Replaces Tauri's default macOS menu, whose "Close Window" takes Cmd+W.
@@ -81,10 +92,13 @@ fn run_app() -> ExitCode {
     let app = commands::register(builder, bridge::PtyBridge::new()).build(context());
     match app {
         Ok(app) => {
+            e2e_log::write("app built, entering the event loop");
             app.run(|app, event| commands::on_run_event(app, &event));
+            e2e_log::write("event loop finished");
             ExitCode::SUCCESS
         }
         Err(err) => {
+            e2e_log::write(&format!("could not start the app: {err}"));
             let _ = writeln!(std::io::stderr(), "termbay: could not start the app: {err}");
             ExitCode::FAILURE
         }
@@ -129,6 +143,49 @@ fn disable_browser_keys(_app: &tauri::App) {}
 /// expanded once per binary; the tests use it with the mock runtime.
 fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
+}
+
+/// Startup diagnostics for e2e builds: with `TERMBAY_E2E_LOG` set, the
+/// command line, the WebView2 variables, panics and the app's lifecycle are
+/// appended to that file, so CI can show why a WebDriver session failed
+/// (the driver does not forward the app's stderr). Compiled out of
+/// release builds.
+mod e2e_log {
+    #[cfg(feature = "e2e")]
+    pub fn write(line: &str) {
+        use std::io::Write;
+        let Some(path) = std::env::var_os("TERMBAY_E2E_LOG") else {
+            return;
+        };
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path);
+        if let Ok(mut file) = file {
+            let _ = writeln!(file, "[pid {}] {line}", std::process::id());
+        }
+    }
+
+    #[cfg(not(feature = "e2e"))]
+    pub fn write(_line: &str) {}
+
+    pub fn start() {
+        if !cfg!(feature = "e2e") {
+            return;
+        }
+        let args: Vec<_> = std::env::args_os().collect();
+        write(&format!("started with {args:?}"));
+        for (key, value) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("WEBVIEW2_") {
+                write(&format!("env {key:?}={value:?}"));
+            }
+        }
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            write(&format!("panic: {info}"));
+            default_hook(info);
+        }));
+    }
 }
 
 mod console {
@@ -181,5 +238,13 @@ mod tests {
         if !cfg!(feature = "e2e") {
             assert!(!launched_by_webview_driver());
         }
+    }
+
+    #[test]
+    fn devtools_options_identify_the_driver() {
+        assert!(is_driver_option("--remote-debugging-port=0".as_ref()));
+        assert!(is_driver_option("--remote-debugging-pipe".as_ref()));
+        assert!(!is_driver_option("--bogus".as_ref()));
+        assert!(!is_driver_option("--user-data-dir=C:\\tmp".as_ref()));
     }
 }
