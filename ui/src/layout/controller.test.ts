@@ -276,6 +276,16 @@ describe("LayoutView", () => {
     expect(document.getElementById("office-panel")?.hidden).toBe(true);
   });
 
+  it("closing back to one pane drops the old flex share, so it fills the panel", async () => {
+    const t = await setup();
+    t.controller.run({ type: "split", direction: "right" });
+    await flush();
+    expect(t.panes[0]!.element.style.flex).toMatch(/^0\.5 1 0/);
+    await t.controller.requestClosePane(activeTab(t.controller.layout).focused);
+    expect(t.panes[0]!.element.style.flex).toBe("");
+    expect(t.panes[0]!.element.parentElement?.classList.contains("tab-panel")).toBe(true);
+  });
+
   it("dragging a divider sets the ratio with a pixel minimum", async () => {
     const t = await setup();
     t.controller.run({ type: "split", direction: "right" });

@@ -269,7 +269,7 @@ jobs:
       - name: Build the e2e app
         run: |
           (cd ui && npm run build:e2e)
-          ui/node_modules/.bin/tauri build --ci --debug --no-bundle
+          ui/node_modules/.bin/tauri build --ci --debug --no-bundle --features e2e
 
       - name: e2e (milestone 1, tabs, splits, flow control)
         run: |

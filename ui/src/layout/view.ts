@@ -171,6 +171,9 @@ export class LayoutView implements Disposable {
     if (node.kind === "pane") {
       const element = panes.get(node.id)?.element ?? this.doc.createElement("div");
       element.classList.add("pane");
+      // A pane that was a split child keeps its old flex share otherwise
+      // (e.g. 0.5 alone in the panel = half the width). applyRatios sets it again.
+      element.style.flex = "";
       if (!element.dataset.paneId) {
         element.dataset.paneId = node.id;
         element.addEventListener("mousedown", () => this.events.focusPane(node.id));

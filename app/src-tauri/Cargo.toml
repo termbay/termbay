@@ -31,6 +31,16 @@ serde_json = "1"
 # it was started from, even though release builds use the GUI subsystem.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+# Turn off WebView2's browser keys (F5, Ctrl+R...). Same versions Tauri
+# already links on Windows, so nothing new in the binary; MIT (OR Apache-2.0).
+webview2-com = "0.39"
+windows = { version = "0.62", default-features = false }
+
+[features]
+# e2e builds only: started by msedgedriver (which sets
+# WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS), unknown command line options open
+# the app instead of failing. Never enabled in release builds.
+e2e = []
 
 [lints]
 workspace = true
