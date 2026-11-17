@@ -16,6 +16,8 @@ use termbay_core::cli::{self, Command};
 mod bridge;
 mod commands;
 mod complete;
+#[cfg(any(target_os = "macos", test))]
+mod menu;
 #[cfg(all(test, unix))]
 mod security_tests;
 
@@ -45,8 +47,11 @@ fn print_and_exit(text: &str) -> ExitCode {
 }
 
 fn run_app() -> ExitCode {
-    let app =
-        commands::register(tauri::Builder::default(), bridge::PtyBridge::new()).build(context());
+    let builder = tauri::Builder::default();
+    // Replaces Tauri's default macOS menu, whose "Close Window" takes Cmd+W.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(menu::build);
+    let app = commands::register(builder, bridge::PtyBridge::new()).build(context());
     match app {
         Ok(app) => {
             app.run(|app, event| commands::on_run_event(app, &event));

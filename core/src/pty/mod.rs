@@ -20,6 +20,10 @@
 //!   split pane) and forgets a session once its shell exits.
 //! - [`OutputBatcher`] and [`spawn_batcher`] group the output into fewer,
 //!   larger chunks for the UI (about 8 ms or 64 KiB per chunk).
+//! - [`FlowControl`] and [`ReadGate`] pause reading while the consumer is
+//!   too far behind (decision D25).
+//! - [`PtySession::info`] reports the shell's directory and foreground
+//!   program ([`PtyInfo`]).
 //!
 //! Every child gets `TERM=xterm-256color`, `COLORTERM=truecolor`,
 //! `TERM_PROGRAM=termbay` and `TERM_PROGRAM_VERSION=<termbay version>`.
@@ -41,12 +45,16 @@
 
 mod batch;
 mod error;
+mod flow;
 mod manager;
+mod procinfo;
 mod session;
 mod shell;
 
 pub use batch::{BatchLimits, BatchSender, OutputBatcher, spawn_batcher};
 pub use error::PtyError;
+pub use flow::{FLOW_HIGH_WATER, FLOW_LOW_WATER, FlowControl, ReadGate};
 pub use manager::{PtyId, PtyManager};
+pub use procinfo::{MAX_NAME_CHARS, PtyInfo};
 pub use session::{ExitStatus, PtyEvent, PtySession, PtySize, SpawnOptions};
 pub use shell::{ShellSpec, default_shell};

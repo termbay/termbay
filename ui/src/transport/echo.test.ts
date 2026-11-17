@@ -87,3 +87,10 @@ describe("EchoPtyTransport with a simulated shell", () => {
     expect(empty.status === "ok" && empty.line).toBe("");
   });
 });
+
+describe("EchoPtySession.info", () => {
+  it("answers the fixed echo info", async () => {
+    const session = await new EchoPtyTransport().open({ cols: 80, rows: 24 });
+    await expect(session.info()).resolves.toEqual({ shell: "echo", cwd: null, busy: false, foreground: null });
+  });
+});

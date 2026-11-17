@@ -18,7 +18,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use termbay_core::pty::{
-    ExitStatus, PtyError, PtyEvent, PtyId, PtyManager, PtySession, PtySize, ShellSpec,
+    ExitStatus, PtyError, PtyEvent, PtyId, PtyManager, PtySession, PtySize, ReadGate, ShellSpec,
     SpawnOptions, default_shell,
 };
 
@@ -520,4 +520,153 @@ fn spawning_a_missing_program_fails() {
         |_| {},
     );
     assert!(matches!(result, Err(PtyError::Spawn(_))), "{result:?}");
+}
+
+/// Command that prints forever.
+fn flood_command() -> &'static [u8] {
+    if cfg!(windows) {
+        b"for /L %i in (0,0,1) do @echo yyyyyyyyyyyyyyyy\r"
+    } else {
+        b"while :; do echo yyyyyyyyyyyyyyyy; done\r"
+    }
+}
+
+/// A plain shell behind a read gate, after its first marker was printed.
+fn gated_shell() -> (Arc<PtySession>, Recorder, Arc<ReadGate>) {
+    let gate = Arc::new(ReadGate::new());
+    let options = SpawnOptions {
+        read_gate: Some(Arc::clone(&gate)),
+        ..plain_shell()
+    };
+    let command = echo_command(&options.shell.as_ref().unwrap().program, "gate_ready");
+    let (session, mut rec) = spawn(options);
+    session.write(command.as_bytes()).unwrap();
+    rec.expect_output("gate_ready");
+    (session, rec, gate)
+}
+
+/// Collects output for `duration`; returns how many bytes arrived.
+fn collect_for(rec: &mut Recorder, duration: Duration) -> usize {
+    let before = rec.output.len();
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        rec.pump(Duration::from_millis(10));
+    }
+    rec.output.len() - before
+}
+
+#[test]
+fn a_paused_gate_stops_reading_and_resuming_continues() {
+    let (session, mut rec, gate) = gated_shell();
+    session.write(flood_command()).unwrap();
+    rec.expect_output("yyyyyyyyyyyyyyyy\r\n");
+    gate.pause();
+    // A read that was already waiting finishes once; then nothing.
+    collect_for(&mut rec, Duration::from_millis(300));
+    assert_eq!(collect_for(&mut rec, Duration::from_millis(500)), 0);
+    gate.resume();
+    eventually("output flows again", || {
+        rec.pump(Duration::from_millis(10));
+        collect_for(&mut rec, Duration::from_millis(50)) > 0
+    });
+
+    // Closing while paused returns quickly and still delivers the exit.
+    gate.pause();
+    collect_for(&mut rec, Duration::from_millis(300));
+    let started = Instant::now();
+    session.kill().unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    rec.expect_exit();
+}
+
+#[test]
+fn exit_while_paused_drains_and_delivers_the_exit() {
+    let (session, mut rec, gate) = gated_shell();
+    gate.pause();
+    collect_for(&mut rec, Duration::from_millis(200));
+    session.write(b"exit 4\r").unwrap();
+    // On macOS the kernel does not let a process finish closing its
+    // terminal while output is pending, so the shell only goes once the
+    // reader resumes, as it does when the UI acks (and `kill` opens the
+    // gate first). Elsewhere the exit itself opens the gate.
+    let mut status = session.wait_timeout(Duration::from_secs(2));
+    if status.is_none() && cfg!(target_os = "macos") {
+        gate.resume();
+        status = session.wait_timeout(TIMEOUT);
+    }
+    let status = status.expect("the shell did not exit");
+    // DRAIN_TIMEOUT is 500 ms; the rest is slack for slow machines.
+    let started = Instant::now();
+    assert_eq!(rec.expect_exit(), status);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(!gate.is_paused(), "the gate must be open after the exit");
+    assert_eq!(status.code(), 4);
+}
+
+#[test]
+fn info_reports_the_shell_idle_busy_and_its_directory() {
+    let (session, mut rec) = spawn(plain_shell());
+    let command = echo_command(Path::new("sh"), "info_ready");
+    let command = if cfg!(windows) {
+        echo_command(Path::new("cmd"), "info_ready")
+    } else {
+        command
+    };
+    session.write(command.as_bytes()).unwrap();
+    rec.expect_output("info_ready");
+
+    let info = session.info();
+    assert_eq!(info.shell, if cfg!(windows) { "cmd" } else { "sh" });
+    eventually("the shell is idle", || {
+        rec.pump(Duration::from_millis(10));
+        session.info().busy == Some(false)
+    });
+    assert_eq!(session.info().foreground, None);
+
+    let dir = std::env::temp_dir().join(format!("termbay-info-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Not on Windows: that gives a `\\?\` path, which cmd rejects.
+    #[cfg(unix)]
+    let dir = dir.canonicalize().unwrap();
+    session
+        .write(format!("cd \"{}\"\r", dir.display()).as_bytes())
+        .unwrap();
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
+        let expected = dir.to_str().unwrap().to_owned();
+        eventually("the cwd follows cd", || {
+            rec.pump(Duration::from_millis(10));
+            session.info().cwd.as_deref() == Some(expected.as_str())
+        });
+    } else {
+        assert_eq!(session.info().cwd, None);
+    }
+
+    let (busy_command, name): (&[u8], &str) = if cfg!(windows) {
+        (b"ping -n 30 127.0.0.1\r", "ping")
+    } else {
+        (b"sleep 30\r", "sleep")
+    };
+    session.write(busy_command).unwrap();
+    eventually("the foreground program is seen", || {
+        rec.pump(Duration::from_millis(10));
+        let info = session.info();
+        info.busy == Some(true)
+            && info
+                .foreground
+                .is_some_and(|fg| fg.eq_ignore_ascii_case(name))
+    });
+
+    session.kill().unwrap();
+    rec.expect_exit();
+    let info = session.info();
+    assert_eq!((info.cwd, info.busy, info.foreground), (None, None, None));
+    let _ = std::fs::remove_dir(&dir);
 }

@@ -4,6 +4,7 @@ import type {
   CompletionResult,
   Disposable,
   PtyExit,
+  PtyInfo,
   PtySession,
   ShellInfo,
 } from "../transport/types";
@@ -70,6 +71,10 @@ export class AutocompleteSession implements PtySession {
 
   onShell(listener: (info: ShellInfo) => void): Disposable {
     return this.inner.onShell(listener);
+  }
+
+  info(): Promise<PtyInfo> {
+    return this.inner.info();
   }
 }
 

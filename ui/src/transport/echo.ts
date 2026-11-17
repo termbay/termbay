@@ -4,6 +4,7 @@ import type {
   CompletionResult,
   Disposable,
   PtyExit,
+  PtyInfo,
   PtyOpenOptions,
   PtySession,
   PtyTransport,
@@ -115,6 +116,11 @@ export class EchoPtySession implements PtySession {
   onShell(listener: (info: ShellInfo) => void): Disposable {
     if (this.shellInfo) listener(this.shellInfo);
     return this.shell.on(listener);
+  }
+
+  async info(): Promise<PtyInfo> {
+    if (this.closed) throw new Error(`no pty with id ${this.id}`);
+    return { shell: "echo", cwd: null, busy: false, foreground: null };
   }
 
   /** @internal Acts as if the shell sent its integration handshake. */

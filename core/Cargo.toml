@@ -18,9 +18,14 @@ memchr = "2"
 serde = { version = "1", features = ["derive"] }
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
-# Used only to escalate to SIGKILL when a shell ignores SIGHUP.
+# SIGKILL when a shell ignores SIGHUP, and process info for `pty_info`.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Lists the children of the shell for `pty_info` (busy / foreground). Same
+# crate and version as the app's; MIT OR Apache-2.0.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
 
 [lints]
 workspace = true

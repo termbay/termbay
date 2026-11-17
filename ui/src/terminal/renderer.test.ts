@@ -47,3 +47,34 @@ describe("RendererController", () => {
     expect(onChange).toHaveBeenLastCalledWith("dom", "webgl context lost");
   });
 });
+
+describe("RendererController.stop (hidden tab)", () => {
+  it("disposes the addon and reloads a new one on start", () => {
+    const made: FakeWebgl[] = [];
+    const host = { loadAddon: vi.fn() };
+    const controller = new RendererController(host, () => {
+      const a = new FakeWebgl();
+      made.push(a);
+      return a;
+    });
+    controller.start();
+    controller.stop();
+    expect(made[0]?.disposed).toBe(true);
+    expect(controller.kind).toBe("dom");
+    expect(controller.start()).toBe("webgl");
+    expect(made).toHaveLength(2);
+    controller.start(); // already active: no third addon
+    expect(made).toHaveLength(2);
+  });
+
+  it("does not retry WebGL after it failed", () => {
+    const addon = new FakeWebgl();
+    const create = vi.fn(() => addon);
+    const controller = new RendererController({ loadAddon: () => {} }, create);
+    controller.start();
+    addon.contextLoss.emit();
+    controller.stop();
+    expect(controller.start()).toBe("dom");
+    expect(create).toHaveBeenCalledOnce();
+  });
+});

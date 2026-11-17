@@ -162,6 +162,12 @@ impl ShellLink {
         !inner.closed && inner.state.is_at_prompt()
     }
 
+    /// Whether the shell is running a command (phase `Running`).
+    pub fn is_running_command(&self) -> bool {
+        let inner = self.lock();
+        !inner.closed && inner.state.phase() == super::state::Phase::Running
+    }
+
     /// Asks the shell for completions and waits for the answer.
     ///
     /// The trigger is written with `write` only when the shell is at its

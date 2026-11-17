@@ -9,17 +9,24 @@
 //! - a writer thread that takes input from a queue. `write` only queues, so
 //!   the caller (the Tauri main thread) never blocks on a shell that is not
 //!   reading its input, and bytes reach the shell in the order they were
-//!   queued.
+//!   queued;
+//! - flow control (D25): the bytes handed to the batcher are counted and
+//!   reading pauses at [`FLOW_HIGH_WATER`] bytes not yet acknowledged by
+//!   the UI ([`PtyBridge::ack`]), resuming at [`FLOW_LOW_WATER`].
+//!
+//! [`FLOW_HIGH_WATER`]: termbay_core::pty::FLOW_HIGH_WATER
+//! [`FLOW_LOW_WATER`]: termbay_core::pty::FLOW_LOW_WATER
 
 use std::collections::HashMap;
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use termbay_core::pty::{
-    BatchLimits, ExitStatus, PtyError, PtyEvent, PtyId, PtyManager, PtySize, SpawnOptions,
-    spawn_batcher,
+    BatchLimits, BatchSender, ExitStatus, FlowControl, PtyError, PtyEvent, PtyId, PtyInfo,
+    PtyManager, PtySize, ReadGate, SpawnOptions, spawn_batcher,
 };
 
 use crate::complete::{ShellReady, ShellSupport};
@@ -33,11 +40,58 @@ pub struct PtyExit {
 }
 
 type InputMap = HashMap<u32, mpsc::Sender<Vec<u8>>>;
+type FlowMap = HashMap<u32, Arc<Flow>>;
+
+/// Most ptys alive at once (D18). Only stops accidents: each pty costs a
+/// process and four threads.
+pub const MAX_PTYS: usize = 64;
+
+/// Longest `cwd` accepted by [`PtyBridge::open_with_shell`], in bytes.
+pub const MAX_CWD_BYTES: usize = 4096;
+
+/// Flow control of one pty: the counter plus the gate of its reader.
+#[derive(Debug, Default)]
+struct Flow {
+    control: Mutex<FlowControl>,
+    gate: Arc<ReadGate>,
+}
+
+impl Flow {
+    /// Called by the reader thread after handing `n` bytes to the batcher.
+    fn sent(&self, n: usize) {
+        let mut control = lock(&self.control);
+        // The gate changes under the counter lock, so a pause and a resume
+        // never cross.
+        if control.sent(u64::try_from(n).unwrap_or(u64::MAX)) {
+            self.gate.pause();
+        }
+    }
+
+    fn acked(&self, n: u64) {
+        let mut control = lock(&self.control);
+        if control.acked(n) {
+            self.gate.resume();
+        }
+    }
+}
+
+/// The directory to open a pty in: `cwd` when it is an absolute path of
+/// at most [`MAX_CWD_BYTES`] bytes naming an existing directory, otherwise
+/// `None` (the home folder). Opening a terminal never fails because of it.
+pub fn valid_cwd(cwd: Option<&str>) -> Option<PathBuf> {
+    let cwd = cwd.filter(|cwd| !cwd.is_empty() && cwd.len() <= MAX_CWD_BYTES)?;
+    let path = Path::new(cwd);
+    (path.is_absolute() && path.is_dir()).then(|| path.to_path_buf())
+}
 
 /// Owns every pty of the app. Dropping it kills every shell.
 pub struct PtyBridge {
     manager: PtyManager,
     inputs: Arc<Mutex<InputMap>>,
+    flows: Arc<Mutex<FlowMap>>,
+    /// Held while checking [`MAX_PTYS`] and spawning, so concurrent opens
+    /// cannot go over it.
+    opening: Mutex<()>,
     template: SpawnOptions,
     limits: BatchLimits,
     /// Shell integration and autocomplete (`complete.rs`); off by default.
@@ -77,6 +131,8 @@ impl PtyBridge {
         Self {
             manager: PtyManager::new(),
             inputs: Arc::default(),
+            flows: Arc::default(),
+            opening: Mutex::new(()),
             template,
             limits: BatchLimits::default(),
             shell,
@@ -95,16 +151,19 @@ impl PtyBridge {
         C: FnMut(Vec<u8>) + Send + 'static,
         X: FnOnce(PtyExit) + Send + 'static,
     {
-        self.open_with_shell(cols, rows, on_chunk, on_exit, |_| {})
+        self.open_with_shell(cols, rows, None, on_chunk, on_exit, |_| {})
     }
 
-    /// [`PtyBridge::open`], plus `on_shell` when the shell's integration
-    /// becomes active (only with autocomplete enabled). `on_shell` runs on
-    /// the reader thread of this pty.
+    /// [`PtyBridge::open`] in the directory `cwd` (see [`valid_cwd`]), plus
+    /// `on_shell` when the shell's integration becomes active (only with
+    /// autocomplete enabled). `on_shell` runs on the reader thread of this
+    /// pty. Fails when [`MAX_PTYS`] are already alive.
+    #[allow(clippy::too_many_arguments)]
     pub fn open_with_shell<C, X, S>(
         &self,
         cols: u16,
         rows: u16,
+        cwd: Option<&str>,
         on_chunk: C,
         on_exit: X,
         mut on_shell: S,
@@ -120,7 +179,13 @@ impl PtyBridge {
             rows: rows.max(1),
         };
 
+        let opening = lock(&self.opening);
+        if self.manager.len() >= MAX_PTYS {
+            return Err(format!("too many terminals are open (limit {MAX_PTYS})"));
+        }
+
         let inputs = Arc::downgrade(&self.inputs);
+        let flows = Arc::downgrade(&self.flows);
         let batcher = spawn_batcher(
             self.limits,
             on_chunk,
@@ -128,6 +193,9 @@ impl PtyBridge {
                 let Some(id) = ipc_id(id) else { return };
                 if let Some(inputs) = inputs.upgrade() {
                     lock(&inputs).remove(&id);
+                }
+                if let Some(flows) = flows.upgrade() {
+                    lock(&flows).remove(&id);
                 }
                 on_exit(PtyExit {
                     id,
@@ -137,21 +205,33 @@ impl PtyBridge {
         )
         .map_err(|err| format!("could not start the output thread: {err}"))?;
 
+        let flow = Arc::new(Flow::default());
         let mut options = SpawnOptions {
             size,
+            read_gate: Some(Arc::clone(&flow.gate)),
             ..self.template.clone()
         };
+        if let Some(cwd) = valid_cwd(cwd) {
+            options.cwd = Some(cwd);
+        }
         // Without integration there is no tap: the output goes straight
         // to the batcher, as before.
         let mut tap = self.shell.prepare(&mut options);
         let link = tap.as_ref().map(|tap| Arc::clone(tap.link()));
+        let reader_flow = Arc::clone(&flow);
+        // Counted after the scanner (removed private sequences are never
+        // acknowledged) and before the batcher, so its queue is bounded too.
+        let forward = move |batcher: &BatchSender<(PtyId, ExitStatus)>, bytes: &[u8]| {
+            batcher.output(bytes);
+            reader_flow.sent(bytes.len());
+        };
         let pty_id = self
             .manager
             .spawn(options, move |id, event| match event {
                 PtyEvent::Output(bytes) => match tap.as_mut() {
-                    None => batcher.output(bytes),
+                    None => forward(&batcher, bytes),
                     Some(tap) => {
-                        let ready = tap.output(bytes, |shown| batcher.output(shown));
+                        let ready = tap.output(bytes, |shown| forward(&batcher, shown));
                         if let (Some(info), Some(id)) = (ready, ipc_id(id)) {
                             on_shell(ShellReady {
                                 id,
@@ -169,6 +249,7 @@ impl PtyBridge {
                 }
             })
             .map_err(|err| err.to_string())?;
+        drop(opening);
 
         let Some(id) = ipc_id(pty_id) else {
             let _ = self.manager.kill(pty_id);
@@ -176,6 +257,14 @@ impl PtyBridge {
         };
         if let Some(link) = link {
             self.shell.register(id, link);
+        }
+        {
+            // Same rule as for the inputs below: the exit callback removes
+            // the entry after the status is set.
+            let mut flows = lock(&self.flows);
+            if self.manager.get(pty_id).is_some_and(|s| s.is_running()) {
+                flows.insert(id, flow);
+            }
         }
 
         // The shell may already be gone (for example, a shell that exits at
@@ -238,6 +327,7 @@ impl PtyBridge {
     /// is not an error.
     pub fn close(&self, id: u32) -> Result<(), String> {
         lock(&self.inputs).remove(&id);
+        lock(&self.flows).remove(&id);
         self.shell.forget(id);
         match self.manager.kill(PtyId::from_raw(id.into())) {
             Ok(()) | Err(PtyError::NotFound(_)) => Ok(()),
@@ -245,14 +335,34 @@ impl PtyBridge {
         }
     }
 
-    /// Bytes the UI has drawn. Flow control (pausing the reader when too
-    /// much is pending) comes in T10; for now the value is accepted and
-    /// ignored, for any id.
-    pub fn ack(&self, _id: u32, _bytes: u64) {}
+    /// Bytes the UI received and processed. Resumes reading once few
+    /// enough are pending. Unknown ids are ignored; an ack larger than what
+    /// is pending resets the count.
+    pub fn ack(&self, id: u32, bytes: u64) {
+        let flow = lock(&self.flows).get(&id).cloned();
+        if let Some(flow) = flow {
+            flow.acked(bytes);
+        }
+    }
+
+    /// What the system says about a pty's shell (`pty_info`), with `busy`
+    /// also set while the shell integration reports a running command.
+    pub fn info(&self, id: u32) -> Result<PtyInfo, String> {
+        let session = self
+            .manager
+            .get(PtyId::from_raw(id.into()))
+            .ok_or_else(|| not_found(id))?;
+        let mut info = session.info();
+        if self.shell.is_running_command(id) {
+            info.busy = Some(true);
+        }
+        Ok(info)
+    }
 
     /// Kills every pty (window closed or app exiting).
     pub fn kill_all(&self) {
         lock(&self.inputs).clear();
+        lock(&self.flows).clear();
         self.manager.kill_all();
     }
 
@@ -366,6 +476,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc::Receiver;
+    use std::time::{Duration, Instant};
 
     use super::test_support::*;
     use super::*;
@@ -503,6 +614,172 @@ mod tests {
         let id = bridge.open(0, 0, |_| {}, |_| {}).unwrap();
         bridge.resize(id, 0, 0).unwrap();
         bridge.close(id).unwrap();
+    }
+
+    /// Command that prints forever.
+    fn flood_command() -> &'static [u8] {
+        if cfg!(windows) {
+            b"for /L %i in (0,0,1) do @echo yyyyyyyyyyyyyyyy\r"
+        } else {
+            b"while :; do echo yyyyyyyyyyyyyyyy; done\r"
+        }
+    }
+
+    /// Receives chunks for `duration`, answering cursor queries and, when
+    /// `ack` is set, confirming every byte as xterm.js would. Returns the
+    /// bytes received.
+    fn pump(
+        bridge: &PtyBridge,
+        id: u32,
+        rx: &Receiver<Seen>,
+        queries: &mut CursorQueries,
+        duration: Duration,
+        ack: bool,
+        output: &mut Vec<u8>,
+    ) -> usize {
+        let deadline = Instant::now() + duration;
+        let mut received = 0;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return received;
+            }
+            match rx.recv_timeout(left) {
+                Ok(Seen::Chunk(chunk)) => {
+                    for _ in 0..queries.count(&chunk) {
+                        let _ = bridge.write(id, CURSOR_ANSWER.to_vec());
+                    }
+                    if ack {
+                        bridge.ack(id, chunk.len() as u64);
+                    }
+                    received += chunk.len();
+                    output.extend(chunk);
+                    // Keep only the tail; enough to find a marker.
+                    if output.len() > 64 * 1024 {
+                        output.drain(..output.len() - 4096);
+                    }
+                }
+                Ok(Seen::Exit(_)) => panic!("the shell exited"),
+                Err(_) => return received,
+            }
+        }
+    }
+
+    #[test]
+    fn flow_control_bounds_unacked_output_and_resumes_with_acks() {
+        let bridge = PtyBridge::with_options(plain_shell());
+        let (id, rx) = open(&bridge);
+        let mut queries = CursorQueries::default();
+        let mut output = Vec::new();
+        bridge.write(id, flood_command().to_vec()).unwrap();
+
+        // Without acks: at most the high mark plus one read in flight.
+        let bound = (termbay_core::pty::FLOW_HIGH_WATER as usize) + 64 * 1024;
+        let mut total = 0;
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(1) || total == 0 {
+            assert!(started.elapsed() < TIMEOUT, "no output");
+            let window = Duration::from_millis(100);
+            total += pump(&bridge, id, &rx, &mut queries, window, false, &mut output);
+        }
+        assert!(total <= bound, "{total} bytes without acks (bound {bound})");
+        assert!(
+            total >= bound / 2,
+            "only {total} bytes arrived before pausing"
+        );
+
+        // Confirming what arrived (and what keeps arriving) lets it flow.
+        bridge.ack(id, total as u64);
+        let mut more = 0;
+        let started = Instant::now();
+        while more < 2 * bound {
+            assert!(started.elapsed() < TIMEOUT, "the output did not resume");
+            let window = Duration::from_millis(100);
+            more += pump(&bridge, id, &rx, &mut queries, window, true, &mut output);
+        }
+
+        // Stop acking so the reader pauses, then Ctrl+C: with acks again,
+        // the prompt is back in less than a second.
+        pump(
+            &bridge,
+            id,
+            &rx,
+            &mut queries,
+            Duration::from_millis(300),
+            false,
+            &mut output,
+        );
+        bridge.write(id, b"\x03".to_vec()).unwrap();
+        bridge.write(id, echo_marker().to_vec()).unwrap();
+        // What was received while not acking is confirmed now.
+        bridge.ack(id, u64::MAX);
+        output.clear();
+        let started = Instant::now();
+        while !String::from_utf8_lossy(&output).contains("ABCD") {
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "the prompt did not come back in 1 s"
+            );
+            pump(
+                &bridge,
+                id,
+                &rx,
+                &mut queries,
+                Duration::from_millis(20),
+                true,
+                &mut output,
+            );
+        }
+        bridge.close(id).unwrap();
+    }
+
+    #[test]
+    fn closing_a_paused_pty_does_not_hang() {
+        let bridge = PtyBridge::with_options(plain_shell());
+        let (id, rx) = open(&bridge);
+        let mut queries = CursorQueries::default();
+        let mut output = Vec::new();
+        bridge.write(id, flood_command().to_vec()).unwrap();
+        let started = Instant::now();
+        let mut total = 0;
+        while total < termbay_core::pty::FLOW_HIGH_WATER as usize {
+            assert!(started.elapsed() < TIMEOUT, "no output");
+            let window = Duration::from_millis(100);
+            total += pump(&bridge, id, &rx, &mut queries, window, false, &mut output);
+        }
+        let started = Instant::now();
+        bridge.close(id).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(until_exit(&bridge, id, &rx).1.id, id);
+        // Acks after the end are ignored.
+        bridge.ack(id, 1);
+    }
+
+    #[test]
+    fn cwd_must_be_an_absolute_existing_directory() {
+        let dir = std::env::temp_dir().canonicalize().unwrap();
+        let dir_text = dir.to_str().unwrap();
+        assert_eq!(valid_cwd(Some(dir_text)), Some(dir.clone()));
+        let file = dir.join(format!("termbay-cwd-file-{}", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        let huge = format!("{dir_text}/{}", "a".repeat(MAX_CWD_BYTES));
+        for bad in [
+            None,
+            Some(""),
+            Some("relative/dir"),
+            Some("."),
+            Some(file.to_str().unwrap()),
+            Some(huge.as_str()),
+        ] {
+            assert_eq!(valid_cwd(bad), None, "{bad:?}");
+        }
+        let missing = dir.join("termbay-no-such-dir-for-tests");
+        assert_eq!(valid_cwd(missing.to_str()), None);
+        let _ = std::fs::remove_file(file);
     }
 
     #[test]

@@ -19,6 +19,8 @@ export class RendererController<A extends WebglAddonLike = WebglAddonLike> imple
   private addon: A | null = null;
   private subscription: Disposable | null = null;
   private current: RendererKind = "dom";
+  /** WebGL failed once (unsupported or context lost): stay on the DOM renderer. */
+  private unavailable = false;
 
   constructor(
     private readonly host: RendererHost<A>,
@@ -32,6 +34,7 @@ export class RendererController<A extends WebglAddonLike = WebglAddonLike> imple
 
   /** Activates WebGL if possible. Returns the renderer in use. */
   start(): RendererKind {
+    if (this.unavailable || this.addon) return this.current;
     try {
       const addon = this.createWebgl();
       this.host.loadAddon(addon);
@@ -45,7 +48,26 @@ export class RendererController<A extends WebglAddonLike = WebglAddonLike> imple
     return this.current;
   }
 
+  /**
+   * Releases the WebGL context (hidden tab: browsers cap live contexts at
+   * about 16). xterm.js goes back to the DOM renderer; `start` brings WebGL back.
+   */
+  stop(): void {
+    if (!this.addon) return;
+    this.subscription?.dispose();
+    this.subscription = null;
+    const addon = this.addon;
+    this.addon = null;
+    try {
+      addon.dispose();
+    } catch {
+      // Already broken; nothing else to do.
+    }
+    this.current = "dom";
+  }
+
   private fallBack(reason: unknown): void {
+    this.unavailable = true;
     this.subscription?.dispose();
     this.subscription = null;
     const addon = this.addon;

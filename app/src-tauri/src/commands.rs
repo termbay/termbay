@@ -2,13 +2,19 @@
 //!
 //! Commands (names as seen from JavaScript):
 //!
-//! - `pty_open({ cols, rows, onData })` -> id (number). `onData` is a
-//!   `Channel` that receives the output as raw bytes (`ArrayBuffer`).
+//! - `pty_open({ cols, rows, onData, cwd? })` -> id (number). `onData` is
+//!   a `Channel` that receives the output as raw bytes (`ArrayBuffer`).
+//!   An invalid `cwd` opens in the home folder, without error. Fails with
+//!   `"too many terminals are open (limit 64)"` at the limit (D18).
 //! - `pty_write(bytes, { headers: { "termbay-pty-id": "<id>" } })`: raw
 //!   body, id in a header.
 //! - `pty_resize({ id, cols, rows })`
 //! - `pty_close({ id })`: closing an unknown id is not an error.
-//! - `pty_ack({ id, bytes })`: accepted and ignored until T10.
+//! - `pty_ack({ id, bytes })`: bytes processed by xterm.js; drives the flow
+//!   control (D25). Unknown ids are ignored.
+//! - `pty_info({ id })` -> `{ shell, cwd, busy, foreground }`.
+//! - `get_config()` -> `{ autocomplete: { enabled, trigger, history } }`;
+//!   an invalid file gives the defaults, never an error.
 //!
 //! When a pty ends (exit or close), `pty-exit` is emitted to the `main`
 //! window with `{ id, exitCode }`, after its last output was sent.
@@ -18,6 +24,9 @@ use serde::Serialize;
 use tauri::http::HeaderMap;
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State, Window, WindowEvent};
+
+use termbay_core::config::{self, Config};
+use termbay_core::pty::PtyInfo;
 
 use crate::bridge::{PtyBridge, PtyExit};
 
@@ -55,6 +64,8 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>, bridge: PtyBridge) -> ta
             pty_resize,
             pty_close,
             pty_ack,
+            pty_info,
+            get_config,
             crate::complete::pty_complete
         ])
         .on_window_event(on_window_event)
@@ -82,6 +93,7 @@ async fn pty_open<R: Runtime>(
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
+    cwd: Option<String>,
 ) -> Result<u32, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let emitter = app.clone();
@@ -89,6 +101,7 @@ async fn pty_open<R: Runtime>(
         app.state::<PtyBridge>().open_with_shell(
             cols,
             rows,
+            cwd.as_deref(),
             move |chunk| {
                 // Fails only if the webview is gone; nothing to do then.
                 let _ = on_data.send(InvokeResponseBody::Raw(chunk));
@@ -129,6 +142,50 @@ async fn pty_close<R: Runtime>(app: AppHandle<R>, id: u32) -> Result<(), String>
 fn pty_ack(bridge: State<'_, PtyBridge>, id: u32, bytes: u64) -> Result<(), String> {
     bridge.ack(id, bytes);
     Ok(())
+}
+
+/// Answer of `pty_info` (section 6.3 of `docs/FASE1-PLANO.md`).
+#[derive(Debug, Clone, Serialize)]
+struct PtyInfoPayload {
+    shell: String,
+    cwd: Option<String>,
+    busy: Option<bool>,
+    foreground: Option<String>,
+}
+
+impl From<PtyInfo> for PtyInfoPayload {
+    fn from(info: PtyInfo) -> Self {
+        Self {
+            shell: info.shell,
+            cwd: info.cwd,
+            busy: info.busy,
+            foreground: info.foreground,
+        }
+    }
+}
+
+/// Async and on a blocking thread: asking the system (a process snapshot
+/// on Windows) can take a moment.
+#[tauri::command]
+async fn pty_info<R: Runtime>(app: AppHandle<R>, id: u32) -> Result<PtyInfoPayload, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<PtyBridge>().info(id))
+        .await
+        .map_err(|err| format!("could not read pty {id}: {err}"))?
+        .map(PtyInfoPayload::from)
+}
+
+/// The configuration the UI needs (D22). Read on each call; problems are
+/// logged and give the defaults.
+#[tauri::command]
+fn get_config() -> Config {
+    load_config(config::load())
+}
+
+fn load_config(loaded: config::Loaded) -> Config {
+    for warning in &loaded.warnings {
+        eprintln!("termbay: {warning}");
+    }
+    loaded.config
 }
 
 /// Reads the pty id header and the raw body of a `pty_write` call.
@@ -248,17 +305,22 @@ mod tests {
         }
 
         fn open(&self, channel: u32) -> u32 {
-            let id = self
-                .invoke(
-                    "pty_open",
-                    json!({ "cols": 80, "rows": 24, "onData": format!("__CHANNEL__:{channel}") }),
-                )
-                .expect("pty_open failed");
+            self.open_in(channel, Value::Null).expect("pty_open failed")
+        }
+
+        /// `pty_open` with this `cwd` (`null` leaves it out).
+        fn open_in(&self, channel: u32, cwd: Value) -> Result<u32, Value> {
+            let mut args =
+                json!({ "cols": 80, "rows": 24, "onData": format!("__CHANNEL__:{channel}") });
+            if !cwd.is_null() {
+                args["cwd"] = cwd;
+            }
+            let id = self.invoke("pty_open", args)?;
             let id = id.as_u64().expect("the id must be a number") as u32;
             self.ptys
                 .borrow_mut()
                 .insert(channel, (id, CursorQueries::default()));
-            id
+            Ok(id)
         }
 
         /// Answers ConPTY's cursor position queries (Windows), as xterm.js
@@ -461,9 +523,162 @@ mod tests {
         };
         assert!(get_ipc_response(&window(MAIN_WINDOW), ack()).is_ok());
         assert!(get_ipc_response(&window("other"), ack()).is_err());
+        let config = || request("get_config", InvokeBody::Json(json!({})), HeaderMap::new());
+        assert!(get_ipc_response(&window(MAIN_WINDOW), config()).is_ok());
+        assert!(get_ipc_response(&window("other"), config()).is_err());
+        // `pty_info` of an unknown id fails in both, but only the main
+        // window reaches the command.
+        let info = || {
+            request(
+                "pty_info",
+                InvokeBody::Json(json!({ "id": 999 })),
+                HeaderMap::new(),
+            )
+        };
+        let message = |label: &str| {
+            get_ipc_response(&window(label), info())
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(message(MAIN_WINDOW).contains("no pty"));
+        assert!(!message("other").contains("no pty"));
         // A command that does not exist is not reachable either.
         let unknown = request("pty_spy", InvokeBody::Json(json!({})), HeaderMap::new());
         assert!(get_ipc_response(&window(MAIN_WINDOW), unknown).is_err());
+    }
+
+    /// Prints the shell's directory.
+    fn pwd_command() -> &'static [u8] {
+        if cfg!(windows) { b"cd\r" } else { b"pwd\r" }
+    }
+
+    #[test]
+    fn pty_open_uses_a_valid_cwd_and_falls_back_to_home() {
+        let h = harness();
+        // Not canonicalized on Windows: that gives a `\\?\` path, which
+        // cmd does not accept as its directory.
+        let temp = std::env::temp_dir();
+        #[cfg(unix)]
+        let temp = temp.canonicalize().unwrap();
+        let dir = temp.join(format!("termbay-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = dir.file_name().unwrap().to_str().unwrap().to_owned();
+        let file = dir.join("file");
+        std::fs::write(&file, b"x").unwrap();
+        let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
+        let home_name = std::path::Path::new(&home)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        let id = h.open_in(10, json!(dir.to_str().unwrap())).unwrap();
+        h.write(
+            Some(&id.to_string()),
+            InvokeBody::Raw(pwd_command().to_vec()),
+        )
+        .unwrap();
+        h.expect_output(10, &name);
+        h.invoke("pty_close", json!({ "id": id })).unwrap();
+        h.expect_exit(10);
+
+        let missing = dir.join("missing");
+        let huge = format!("{}/{}", dir.display(), "a".repeat(5000));
+        let bad = [
+            json!("relative"),
+            json!(missing.to_str().unwrap()),
+            json!(file.to_str().unwrap()),
+            json!(""),
+            json!(huge),
+        ];
+        for (channel, cwd) in (11..).zip(bad) {
+            let id = h.open_in(channel, cwd.clone()).unwrap_or_else(|err| {
+                panic!("pty_open with {cwd} failed: {err}");
+            });
+            h.write(
+                Some(&id.to_string()),
+                InvokeBody::Raw(pwd_command().to_vec()),
+            )
+            .unwrap();
+            h.expect_output(channel, &home_name);
+            h.invoke("pty_close", json!({ "id": id })).unwrap();
+            h.expect_exit(channel);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pty_open_stops_at_the_limit_until_one_closes() {
+        let h = harness();
+        let ids: Vec<u32> = (0..64).map(|channel| h.open(100 + channel)).collect();
+        let err = h.open_in(200, Value::Null).unwrap_err();
+        assert_eq!(err, json!("too many terminals are open (limit 64)"));
+        h.invoke("pty_close", json!({ "id": ids[0] })).unwrap();
+        h.open_in(201, Value::Null).expect("a slot was freed");
+        h.app.state::<PtyBridge>().kill_all();
+    }
+
+    #[test]
+    fn pty_info_reports_the_shell_and_rejects_unknown_ids() {
+        let h = harness();
+        let id = h.open(20);
+        let deadline = Instant::now() + TIMEOUT;
+        let info = loop {
+            let info = h.invoke("pty_info", json!({ "id": id })).unwrap();
+            if info["busy"] == json!(false) {
+                break info;
+            }
+            assert!(Instant::now() < deadline, "never idle: {info}");
+            // Answers ConPTY's start-up query so the shell can run.
+            while let Ok(Seen::Data(channel, bytes)) =
+                h.seen.recv_timeout(std::time::Duration::from_millis(50))
+            {
+                h.answer_queries(channel, &bytes);
+            }
+        };
+        let shell = if cfg!(windows) { "cmd" } else { "sh" };
+        assert_eq!(info["shell"], json!(shell));
+        assert_eq!(info["foreground"], Value::Null);
+        assert!(info["cwd"].is_string() || cfg!(windows), "{info}");
+        let keys: Vec<_> = info.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys.len(), 4, "{info}");
+        let err = h.invoke("pty_info", json!({ "id": 999 })).unwrap_err();
+        assert!(err.as_str().unwrap().contains("no pty"), "{err}");
+    }
+
+    #[test]
+    fn get_config_gives_defaults_for_a_missing_or_invalid_file() {
+        let dir = std::env::temp_dir().join(format!("termbay-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let defaults = json!({
+            "autocomplete": { "enabled": false, "trigger": "tab", "history": true }
+        });
+        let answer = |path: &std::path::Path| {
+            serde_json::to_value(load_config(config::load_from(path))).unwrap()
+        };
+
+        assert_eq!(answer(&path), defaults);
+        std::fs::write(
+            &path,
+            "[autocomplete]\nenabled = true\ntrigger = \"ctrl+space\"\nhistory = false\n",
+        )
+        .unwrap();
+        assert_eq!(
+            answer(&path),
+            json!({
+                "autocomplete": { "enabled": true, "trigger": "ctrl+space", "history": false }
+            })
+        );
+        std::fs::write(&path, "[autocomplete\nenabled = = 1").unwrap();
+        assert_eq!(answer(&path), defaults);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Through the IPC too.
+        let h = harness();
+        let config = h.invoke("get_config", json!({})).unwrap();
+        assert!(config["autocomplete"]["trigger"].is_string(), "{config}");
     }
 
     #[test]

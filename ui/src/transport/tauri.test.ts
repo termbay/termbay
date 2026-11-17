@@ -13,6 +13,7 @@ import {
   type PtyShellPayload,
   type TauriIpc,
 } from "./tauri";
+import { DEFAULT_CONFIG, loadConfig } from "./config";
 import type { Disposable } from "./types";
 
 interface Call {
@@ -37,6 +38,10 @@ class FakeIpc implements TauriIpc {
   failWith: Partial<Record<string, string>> = {};
   /** Answer of `pty_complete`. */
   completion: unknown = { status: "unavailable" };
+  /** Answer of `pty_info`. */
+  ptyInfo: unknown = { shell: "zsh", cwd: "/home/u", busy: false, foreground: null };
+  /** Answer of `get_config`. */
+  config: unknown = { autocomplete: { enabled: true, trigger: "ctrl+space", history: false } };
   /** Runs inside `pty_open` before it resolves (e.g. to emit an early exit). */
   onOpen: ((id: number) => void) | undefined;
 
@@ -59,6 +64,8 @@ class FakeIpc implements TauriIpc {
       });
     }
     if (cmd === "pty_complete") return this.completion as T;
+    if (cmd === "pty_info") return this.ptyInfo as T;
+    if (cmd === "get_config") return this.config as T;
     if (cmd === "pty_open") {
       const id = this.nextId++;
       this.onOpen?.(id);
@@ -476,5 +483,46 @@ describe("TauriPtyTransport autocomplete", () => {
     const { ipc, transport } = await setup();
     await transport.dispose();
     expect(ipc.listenerCount(PTY_SHELL_EVENT)).toBe(0);
+  });
+});
+
+describe("milestone 2 contract (FASE1-PLANO 6.3)", () => {
+  it("sends pty_open without cwd, and with cwd when given, never env", async () => {
+    const ipc = new FakeIpc();
+    const transport = new TauriPtyTransport(ipc);
+    await transport.open({ cols: 80, rows: 24 });
+    await transport.open({ cols: 100, rows: 30, cwd: "/tmp/x" });
+    const [a, b] = ipc.callsOf("pty_open").map((c) => c.args as Record<string, unknown>);
+    expect(Object.keys(a ?? {}).sort()).toEqual(["cols", "onData", "rows"]);
+    expect(b).toMatchObject({ cols: 100, rows: 30, cwd: "/tmp/x" });
+    expect(b).not.toHaveProperty("env");
+  });
+
+  it("turns the pty limit error into an Error", async () => {
+    const ipc = new FakeIpc();
+    ipc.failWith.pty_open = "too many terminals are open (limit 64)";
+    await expect(new TauriPtyTransport(ipc).open({ cols: 80, rows: 24 })).rejects.toThrow(
+      new Error("too many terminals are open (limit 64)"),
+    );
+  });
+
+  it("calls pty_info with the numeric id and returns the answer", async () => {
+    const ipc = new FakeIpc();
+    const session = await new TauriPtyTransport(ipc).open({ cols: 80, rows: 24 });
+    await expect(session.info()).resolves.toEqual({ shell: "zsh", cwd: "/home/u", busy: false, foreground: null });
+    expect(ipc.callsOf("pty_info")[0]?.args).toEqual({ id: 7 });
+    ipc.failWith.pty_info = "no pty with id 7";
+    await expect(session.info()).rejects.toThrow(new Error("no pty with id 7"));
+  });
+
+  it("loads the config with get_config, defaults outside Tauri and for bad fields", async () => {
+    const ipc = new FakeIpc();
+    await expect(loadConfig(ipc)).resolves.toEqual({ autocomplete: { enabled: true, trigger: "ctrl+space", history: false } });
+    expect(ipc.callsOf("get_config")[0]?.args).toBeUndefined();
+    await expect(loadConfig()).resolves.toEqual(DEFAULT_CONFIG);
+    ipc.config = { autocomplete: { enabled: "yes", trigger: "alt" } };
+    await expect(loadConfig(ipc)).resolves.toEqual(DEFAULT_CONFIG);
+    ipc.failWith.get_config = "boom";
+    await expect(loadConfig(ipc)).rejects.toThrow(new Error("boom"));
   });
 });

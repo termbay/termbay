@@ -17,8 +17,196 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: row;
+  box-sizing: border-box;
+}
+
+/* Vertical tab list on the left, Warp style. Titles are plain text (textContent). */
+.tabbar {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 4px;
+  box-sizing: border-box;
+  background: #101216;
+  border-right: 1px solid #2a2e36;
+  font: 12px system-ui, sans-serif;
+  color: #9aa0ab;
+  overflow-y: auto;
+  user-select: none;
+}
+
+.tabbar[hidden] {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 4px 5px 8px;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+  cursor: default;
+}
+
+.tab:hover {
+  background: #1a1d23;
+}
+
+.tab[aria-selected="true"] {
+  background: #23262e;
+  color: #d6d9e0;
+  border-left-color: #d6d9e0;
+}
+
+.tab-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-title,
+.tab-cwd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-cwd {
+  font-size: 11px;
+  color: #7c828d;
+}
+
+.tab-cwd:empty {
+  display: none;
+}
+
+.tab-close,
+.tab-new {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab-close {
+  padding: 0 6px;
+  visibility: hidden;
+}
+
+.tab:hover .tab-close,
+.tab-close:focus-visible {
+  visibility: visible;
+}
+
+.tab-new {
+  text-align: left;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+}
+
+.tab-close:hover,
+.tab-new:hover {
+  color: #ffffff;
+  background: #1a1d23;
+}
+
+.tab-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.tab-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+.split {
+  flex: 1 1 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-row {
+  flex-direction: row;
+}
+
+.split-column {
+  flex-direction: column;
+}
+
+.pane {
+  flex: 1 1 0;
+  min-width: 80px;
+  min-height: 48px;
+  overflow: hidden;
+  position: relative;
   padding: 4px 0 0 6px;
   box-sizing: border-box;
+  border: 1px solid transparent;
+}
+
+/* Only marked when there is more than one pane. */
+.split .pane.focused {
+  border-color: #d6d9e0;
+}
+
+.divider {
+  flex: 0 0 4px;
+  background: #2a2e36;
+}
+
+.split-row > .divider {
+  cursor: col-resize;
+}
+
+.split-column > .divider {
+  cursor: row-resize;
+}
+
+/* In-page confirmation (D21). */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 100;
+}
+
+.confirm {
+  max-width: 420px;
+  padding: 16px;
+  background: #1f2229;
+  color: #d6d9e0;
+  border: 1px solid #3a3f4a;
+  border-radius: 6px;
+  font: 13px system-ui, sans-serif;
+}
+
+.confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm button {
+  padding: 4px 12px;
+  font: inherit;
 }
 
 #office-panel {

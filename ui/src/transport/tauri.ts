@@ -6,6 +6,7 @@ import type {
   CompletionResult,
   Disposable,
   PtyExit,
+  PtyInfo,
   PtyOpenOptions,
   PtySession,
   PtyTransport,
@@ -124,7 +125,7 @@ function toBytes(message: ChannelMessage): Uint8Array {
 /**
  * Pty transport over the commands of the Tauri app (`app/src-tauri`):
  * `pty_open` with a binary `Channel` for output, `pty_write` with a raw body,
- * `pty_resize`, `pty_ack`, `pty_close`, `pty_complete`, and the `pty-exit`
+ * `pty_resize`, `pty_ack`, `pty_close`, `pty_complete`, `pty_info`, and the `pty-exit`
  * and `pty-shell` events.
  */
 export class TauriPtyTransport implements PtyTransport {
@@ -159,7 +160,6 @@ export class TauriPtyTransport implements PtyTransport {
         rows: options.rows,
         onData,
         ...(options.cwd !== undefined && { cwd: options.cwd }),
-        ...(options.env !== undefined && { env: options.env }),
       });
     } catch (error) {
       throw toError(error);
@@ -295,6 +295,14 @@ export class TauriPtySession implements PtySession {
     if (this.exited) return;
     this.shellInfo = info;
     this.shell.emit(info);
+  }
+
+  async info(): Promise<PtyInfo> {
+    try {
+      return await this.ipc.invoke<PtyInfo>("pty_info", { id: this.ptyId });
+    } catch (error) {
+      throw toError(error);
+    }
   }
 
   async resize(cols: number, rows: number): Promise<void> {

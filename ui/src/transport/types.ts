@@ -21,10 +21,24 @@ export interface PtyOpenOptions {
   /** Initial size, in character cells. */
   readonly cols: number;
   readonly rows: number;
-  /** Working directory. Defaults to the user's home on the core side. */
+  /**
+   * Working directory: an absolute path to a folder. The core falls back to the
+   * user's home, without error, when it is relative, too long, missing or not a
+   * folder. Only ever taken from `PtySession.info()`, never from OSC 7 (D23).
+   */
   readonly cwd?: string;
-  /** Extra environment variables, on top of what the core sets (TERM, COLORTERM...). */
-  readonly env?: Readonly<Record<string, string>>;
+}
+
+/** Result of `pty_info`, computed by the core from the OS when asked. */
+export interface PtyInfo {
+  /** Shell program name, without folder or extension: "zsh", "fish", "bash", "pwsh", "cmd". */
+  readonly shell: string;
+  /** Current directory of the shell process, or null when unknown. */
+  readonly cwd: string | null;
+  /** true: a program runs in place of the shell; false: idle shell; null: unknown. */
+  readonly busy: boolean | null;
+  /** Foreground program name when busy is true (at most 64 chars), else null. */
+  readonly foreground: string | null;
 }
 
 export interface PtyExit {
@@ -114,6 +128,9 @@ export interface PtySession {
    * after that is called at once. Never fires when autocomplete is disabled.
    */
   onShell(listener: (info: ShellInfo) => void): Disposable;
+
+  /** Asks the core about the shell process (`pty_info`). Computed on demand. */
+  info(): Promise<PtyInfo>;
 }
 
 export interface PtyTransport {

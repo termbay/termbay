@@ -16,8 +16,9 @@ fn prototype_freezing_stays_off() {
     );
 }
 
-/// The main window may call the pty commands (with `pty_complete`) and listen to events
-/// (for `pty-exit`), and nothing else: no shell, fs or http plugins.
+/// The main window may call the pty commands (with `pty_complete` and
+/// `pty_info`), `get_config`, listen to events (for `pty-exit`) and close
+/// itself (D19), and nothing else: no shell, fs or http plugins.
 #[test]
 fn main_capability_grants_only_the_pty_commands_and_event_listening() {
     let compact: String = MAIN_CAPABILITY.split_whitespace().collect();
@@ -35,14 +36,17 @@ fn main_capability_grants_only_the_pty_commands_and_event_listening() {
     assert_eq!(
         permissions,
         [
+            "allow-get-config",
             "allow-pty-ack",
             "allow-pty-close",
             "allow-pty-complete",
+            "allow-pty-info",
             "allow-pty-open",
             "allow-pty-resize",
             "allow-pty-write",
             "core:event:allow-listen",
             "core:event:allow-unlisten",
+            "core:window:allow-close",
         ]
     );
     assert!(compact.contains(r#""windows":["main"]"#));

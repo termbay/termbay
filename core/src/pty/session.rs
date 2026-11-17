@@ -12,6 +12,8 @@ use std::time::Duration;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, native_pty_system};
 
 use super::error::PtyError;
+use super::flow::ReadGate;
+use super::procinfo::{self, PtyInfo};
 use super::shell::{ShellSpec, default_shell};
 
 /// Size of each read from the pty. Batching for the UI happens one layer
@@ -81,6 +83,11 @@ pub struct SpawnOptions {
     pub env: Vec<(OsString, OsString)>,
     /// Initial size.
     pub size: PtySize,
+    /// Flow control: when set, the reader thread waits on this gate before
+    /// each read (see [`ReadGate`]). The session opens it for good when the
+    /// shell exits or is killed, so the rest of the output is drained.
+    /// `None` reads without limit.
+    pub read_gate: Option<Arc<ReadGate>>,
 }
 
 /// Something that happened in a session, delivered to the callback given
@@ -155,6 +162,7 @@ struct Shared {
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     status: Mutex<Option<ExitStatus>>,
     exited: Condvar,
+    gate: Option<Arc<ReadGate>>,
 }
 
 /// One shell running in its own pty.
@@ -166,6 +174,7 @@ pub struct PtySession {
     shared: Arc<Shared>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     pid: Option<u32>,
+    shell_name: String,
 }
 
 impl fmt::Debug for PtySession {
@@ -193,6 +202,7 @@ impl PtySession {
             .map_err(|err| PtyError::Open(format!("{err:#}")))?;
 
         let shell = options.shell.unwrap_or_else(default_shell);
+        let shell_name = procinfo::program_name(&shell.program);
         let mut cmd = CommandBuilder::new(&shell.program);
         cmd.args(&shell.args);
         if let Some(cwd) = &options.cwd {
@@ -235,6 +245,7 @@ impl PtySession {
             writer: Mutex::new(Some(writer)),
             status: Mutex::new(None),
             exited: Condvar::new(),
+            gate: options.read_gate,
         });
         let sink = Arc::new(Mutex::new(Sink {
             callback: Box::new(on_event),
@@ -249,12 +260,14 @@ impl PtySession {
             shared: Arc::clone(&shared),
             killer: Mutex::new(killer),
             pid,
+            shell_name,
         };
 
         let reader_sink = Arc::clone(&sink);
+        let reader_gate = shared.gate.clone();
         let spawned = thread::Builder::new()
             .name("termbay-pty-reader".into())
-            .spawn(move || read_loop(reader, &reader_sink, done_tx));
+            .spawn(move || read_loop(reader, &reader_sink, reader_gate.as_deref(), done_tx));
         if let Err(err) = spawned {
             let _ = lock(&session.killer).kill();
             let status = child.wait().map(ExitStatus::from).ok();
@@ -347,6 +360,7 @@ impl PtySession {
         if !self.is_running() {
             return Ok(());
         }
+        self.open_gate();
         // The result is ignored on purpose: the process may exit on its own
         // between the check above and this call.
         let _ = lock(&self.killer).kill();
@@ -363,6 +377,61 @@ impl PtySession {
                 io::ErrorKind::TimedOut,
                 "the shell did not exit after being killed",
             ))),
+        }
+    }
+
+    /// What the system says about the shell and its foreground program
+    /// (`pty_info`). Computed on each call; nothing runs in between.
+    ///
+    /// - `cwd`: the shell process's directory on macOS and Linux; `None`
+    ///   on Windows.
+    /// - `busy` / `foreground`: on Unix, the foreground process group of
+    ///   the pty compared with the shell; on Windows, the shell's direct
+    ///   children (console hosts ignored).
+    ///
+    /// After the shell exited, only `shell` is known.
+    pub fn info(&self) -> PtyInfo {
+        let mut info = PtyInfo {
+            shell: self.shell_name.clone(),
+            cwd: None,
+            busy: None,
+            foreground: None,
+        };
+        let Some(pid) = self.pid.filter(|_| self.is_running()) else {
+            return info;
+        };
+        info.cwd = procinfo::process_cwd(pid).and_then(procinfo::path_to_string);
+        let foreground = self.foreground(pid);
+        info.busy = foreground.as_ref().map(Option::is_some);
+        info.foreground = foreground.flatten().filter(|name| !name.is_empty());
+        info
+    }
+
+    /// `None`: unknown; `Some(None)`: the shell is in the foreground;
+    /// `Some(Some(name))`: another program is (its name may be empty when
+    /// unknown, which is reported as `busy` without a name).
+    #[cfg(unix)]
+    fn foreground(&self, pid: u32) -> Option<Option<String>> {
+        let leader = {
+            let master = lock(&self.shared.master);
+            master.as_ref()?.process_group_leader()?
+        };
+        let leader = u32::try_from(leader).ok()?;
+        if leader == pid {
+            return Some(None);
+        }
+        Some(Some(procinfo::process_name(leader).unwrap_or_default()))
+    }
+
+    #[cfg(windows)]
+    fn foreground(&self, pid: u32) -> Option<Option<String>> {
+        let children = procinfo::child_processes(pid)?;
+        Some(children.into_iter().last())
+    }
+
+    fn open_gate(&self) {
+        if let Some(gate) = &self.shared.gate {
+            gate.open();
         }
     }
 
@@ -399,9 +468,18 @@ impl Drop for PtySession {
     }
 }
 
-fn read_loop(mut reader: Box<dyn Read + Send>, sink: &Mutex<Sink>, done: mpsc::Sender<()>) {
+fn read_loop(
+    mut reader: Box<dyn Read + Send>,
+    sink: &Mutex<Sink>,
+    gate: Option<&ReadGate>,
+    done: mpsc::Sender<()>,
+) {
     let mut buf = vec![0u8; READ_BUFFER_SIZE];
     loop {
+        // Outside the sink lock, so `finish` can always take it.
+        if let Some(gate) = gate {
+            gate.wait();
+        }
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
@@ -423,6 +501,10 @@ fn read_loop(mut reader: Box<dyn Read + Send>, sink: &Mutex<Sink>, done: mpsc::S
 fn finish(shared: &Shared, sink: &Mutex<Sink>, done: &mpsc::Receiver<()>, status: ExitStatus) {
     *lock(&shared.status) = Some(status.clone());
     shared.exited.notify_all();
+    // A paused reader must drain what is left, not wait forever.
+    if let Some(gate) = &shared.gate {
+        gate.open();
+    }
 
     // Release our side of the pty. On Windows this closes the pseudo
     // console so the reader sees end-of-file; on Unix the reader keeps its

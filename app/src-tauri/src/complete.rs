@@ -219,6 +219,13 @@ impl ShellSupport {
     }
 
     /// Forgets a pty.
+    /// Whether the integrated shell of `id` is running a command,
+    /// according to its trusted marks. `false` without integration.
+    pub fn is_running_command(&self, id: u32) -> bool {
+        let link = self.lock().get(&id).cloned();
+        link.is_some_and(|link| link.is_running_command())
+    }
+
     pub fn forget(&self, id: u32) {
         if let Some(link) = self.lock().remove(&id) {
             link.close();

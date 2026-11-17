@@ -13,7 +13,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Environment variable that points to another configuration file.
 pub const CONFIG_ENV: &str = "TERMBAY_CONFIG";
@@ -21,15 +21,16 @@ pub const CONFIG_ENV: &str = "TERMBAY_CONFIG";
 /// Files larger than this are not read (a configuration is a few lines).
 const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
 
-/// The whole configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The whole configuration. Serializes as the `get_config` answer of the
+/// app (section 6.3 of `docs/FASE1-PLANO.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Config {
     /// `[autocomplete]`.
     pub autocomplete: AutocompleteConfig,
 }
 
 /// `[autocomplete]`: the Warp-style suggestion menu (`docs/AUTOCOMPLETE.md`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AutocompleteConfig {
     /// Injects the shell integration and enables the menu. Off by default
@@ -52,7 +53,7 @@ impl Default for AutocompleteConfig {
 }
 
 /// Key that opens the autocomplete menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Trigger {
     /// `trigger = "tab"`.
     #[serde(rename = "tab")]

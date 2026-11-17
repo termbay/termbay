@@ -9,6 +9,8 @@ const COMMANDS: &[&str] = &[
     "pty_close",
     "pty_ack",
     "pty_complete",
+    "pty_info",
+    "get_config",
 ];
 
 fn main() {
