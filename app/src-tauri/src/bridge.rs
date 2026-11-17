@@ -619,16 +619,10 @@ mod tests {
     /// Command that prints forever.
     fn flood_command() -> &'static [u8] {
         if cfg!(windows) {
-            // cmd's loop is slow per iteration; long lines raise the
-            // throughput so the high-water mark is reached quickly.
-            concat!(
-                "for /L %i in (0,0,1) do @echo ",
-                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\r"
-            )
-            .as_bytes()
+            // Not a cmd `for /L` loop: after Ctrl+C it keeps counting
+            // silently and the prompt never comes back. PowerShell stops on
+            // CTRL_C_EVENT; long lines keep the throughput up under ConPTY.
+            b"powershell -NoProfile -Command \"while($true){'y'*256}\"\r"
         } else {
             b"while :; do echo yyyyyyyyyyyyyyyy; done\r"
         }

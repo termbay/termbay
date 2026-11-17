@@ -15,19 +15,25 @@ const SECONDS = Number(process.env.TERMBAY_E2E_FLOW_SECONDS ?? 10);
 const results = [];
 let app;
 
-/** Resident memory of every termbay process (app; the WebKit processes are separate). */
-function appMemoryMb() {
-  let kb = 0;
+/**
+ * Resident memory in MB of the termbay process (core, queues, Tauri) and of
+ * the WebKit web process (page, xterm.js buffers, DOM). Kept apart: the
+ * WebKit side grows with the scrollback filling up, which is expected and
+ * bounded; the app side is what flow control must keep flat.
+ */
+function memoryMb() {
+  const kb = { app: 0, webkit: 0 };
   for (const pid of readdirSync("/proc").filter((p) => /^\d+$/.test(p))) {
     try {
       const status = readFileSync(`/proc/${pid}/status`, "utf8");
-      if (!/^Name:\s+(termbay|WebKitWebProces)/m.test(status)) continue;
-      kb += Number(/^VmRSS:\s+(\d+)/m.exec(status)?.[1] ?? 0);
+      const name = /^Name:\s+(\S+)/m.exec(status)?.[1];
+      const key = name === "termbay" ? "app" : name === "WebKitWebProces" ? "webkit" : null;
+      if (key) kb[key] += Number(/^VmRSS:\s+(\d+)/m.exec(status)?.[1] ?? 0);
     } catch {
       // The process went away.
     }
   }
-  return kb / 1024;
+  return { app: kb.app / 1024, webkit: kb.webkit / 1024 };
 }
 
 const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))];
@@ -63,7 +69,7 @@ async function scenario(panes) {
   writeConfig("");
   app = await App.start();
   await sleep(1000);
-  const idle = appMemoryMb();
+  const idle = memoryMb();
   // `panes` panes with `yes`, plus one quiet pane to type in.
   for (let i = 1; i <= panes; i++) {
     await app.chord(...(i % 2 ? SHORTCUT.splitRight : SHORTCUT.splitDown));
@@ -76,8 +82,9 @@ async function scenario(panes) {
   await sleep((SECONDS * 1000) / 2);
   await focusIndex(panes);
   const latencies = await echoLatencies(20);
-  const busy = appMemoryMb();
+  const busy = memoryMb();
   await sleep((SECONDS * 1000) / 2);
+  const busyEnd = memoryMb();
 
   const ctrlC = [];
   for (let i = 0; i < panes; i++) {
@@ -90,7 +97,7 @@ async function scenario(panes) {
     ctrlC.push(performance.now() - started);
   }
   await sleep(3000);
-  const rest = appMemoryMb();
+  const rest = memoryMb();
   await app.quit();
   app = undefined;
 
@@ -100,6 +107,7 @@ async function scenario(panes) {
     ctrlCMax: Math.max(...ctrlC),
     idle,
     busy,
+    busyEnd,
     rest,
   };
   results.push(row);
@@ -109,12 +117,14 @@ async function scenario(panes) {
 before(() => {
   if (!skip) writeConfig("");
 });
+const mem = (r, key) => [r.idle, r.busy, r.busyEnd, r.rest].map((m) => m[key].toFixed(0)).join(" / ");
+
 after(async () => {
   await app?.quit();
   if (results.length === 0) return;
-  let table = `### Flow control in the app (F2, ${SECONDS} s of yes)\n\n| panes with yes | echo p95 (ms) | Ctrl+C to output, worst (ms) | memory idle / busy / after (MB) |\n|---:|---:|---:|---|\n`;
+  let table = `### Flow control in the app (F2, ${SECONDS} s of yes)\n\n| panes with yes | echo p95 (ms) | Ctrl+C to output, worst (ms) | app MB idle / busy / end / after | WebKit MB idle / busy / end / after |\n|---:|---:|---:|---|---|\n`;
   for (const r of results) {
-    table += `| ${r.panes} | ${r.p95.toFixed(0)} | ${r.ctrlCMax.toFixed(0)} | ${r.idle.toFixed(0)} / ${r.busy.toFixed(0)} / ${r.rest.toFixed(0)} |\n`;
+    table += `| ${r.panes} | ${r.p95.toFixed(0)} | ${r.ctrlCMax.toFixed(0)} | ${mem(r, "app")} | ${mem(r, "webkit")} |\n`;
   }
   console.log(table);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, table + "\n");
@@ -125,6 +135,12 @@ for (const panes of [1, 4]) {
     const r = await scenario(panes);
     assert.ok(r.p95 < 100 * 3, `echo p95 ${r.p95.toFixed(0)} ms (target 100 ms; CI fails only above 3x)`);
     assert.ok(r.ctrlCMax < 1000 * 3, `Ctrl+C ${r.ctrlCMax.toFixed(0)} ms (target 1 s; CI fails only above 3x)`);
-    assert.ok(r.busy - r.idle < 100, `memory grew ${(r.busy - r.idle).toFixed(0)} MB under load`);
+    // Criterion of section 6.5 on the process flow control protects.
+    const app = Math.max(r.busy.app, r.busyEnd.app) - r.idle.app;
+    assert.ok(app < 100, `termbay grew ${app.toFixed(0)} MB under load`);
+    // The page may grow while the scrollback fills, but must level off:
+    // the second half of the load adds little (a leak would keep growing).
+    const late = r.busyEnd.webkit - r.busy.webkit;
+    assert.ok(late < 50, `WebKit kept growing: +${late.toFixed(0)} MB in the second half of the load`);
   });
 }
