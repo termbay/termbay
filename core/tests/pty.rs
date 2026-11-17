@@ -4,10 +4,16 @@
 //! Commands are written so that the text the shell echoes back while we
 //! "type" never contains the marker we look for; only the command's output
 //! does (for example `echo AB""CD` prints `ABCD`).
+//!
+//! On Windows, ConPTY asks for the cursor position (`ESC[6n`) when it starts
+//! and waits for the answer before running the shell. In the app xterm.js
+//! answers; here the test helpers do (see [`CursorQueries`]). The core
+//! itself must not answer, or the app would send two answers.
 
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -24,11 +30,64 @@ enum Event {
     Exit(ExitStatus),
 }
 
-/// Collects what a session sends to its callback.
+/// Cursor position query a terminal must answer (DSR 6).
+const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+/// Answer to [`CURSOR_QUERY`]: row 1, column 1.
+const CURSOR_ANSWER: &[u8] = b"\x1b[1;1R";
+
+/// Finds cursor position queries in a stream of output chunks, including
+/// a query split between two chunks.
+#[derive(Default)]
+struct CursorQueries {
+    /// Last bytes of the previous chunk (fewer than a whole query, so a
+    /// query is never counted twice).
+    tail: Vec<u8>,
+}
+
+impl CursorQueries {
+    /// Number of queries that end in `chunk`.
+    fn count(&mut self, chunk: &[u8]) -> usize {
+        let mut data = std::mem::take(&mut self.tail);
+        data.extend_from_slice(chunk);
+        let mut count = 0;
+        let mut i = 0;
+        while i + CURSOR_QUERY.len() <= data.len() {
+            if data[i..].starts_with(CURSOR_QUERY) {
+                count += 1;
+                i += CURSOR_QUERY.len();
+            } else {
+                i += 1;
+            }
+        }
+        // Fewer than `CURSOR_QUERY.len()` bytes were not scanned yet; they
+        // may be the start of a query that ends in the next chunk.
+        data.drain(..i);
+        self.tail = data;
+        count
+    }
+}
+
+#[test]
+fn cursor_queries_are_found_even_when_split() {
+    let mut q = CursorQueries::default();
+    assert_eq!(q.count(b"abc\x1b[6nxyz"), 1);
+    assert_eq!(q.count(b"\x1b["), 0);
+    assert_eq!(q.count(b"6"), 0);
+    assert_eq!(q.count(b"n\x1b[6n\x1b[6n"), 3);
+    assert_eq!(q.count(b"[6n"), 0);
+    assert_eq!(q.count(b""), 0);
+    assert_eq!(q.count(b"\x1b"), 0);
+    assert_eq!(q.count(b"[6n"), 1);
+}
+
+/// Collects what a session sends to its callback, answering cursor
+/// position queries like a terminal would.
 struct Recorder {
     rx: Receiver<Event>,
     output: Vec<u8>,
     exit: Option<ExitStatus>,
+    session: Weak<PtySession>,
+    queries: CursorQueries,
 }
 
 impl Recorder {
@@ -40,6 +99,11 @@ impl Recorder {
         match self.rx.recv_timeout(timeout) {
             Ok(Event::Output(bytes)) => {
                 assert!(self.exit.is_none(), "output delivered after Exit");
+                for _ in 0..self.queries.count(&bytes) {
+                    if let Some(session) = self.session.upgrade() {
+                        let _ = session.write(CURSOR_ANSWER);
+                    }
+                }
                 self.output.extend_from_slice(&bytes);
                 true
             }
@@ -89,7 +153,7 @@ impl Recorder {
     }
 }
 
-fn spawn(options: SpawnOptions) -> (PtySession, Recorder) {
+fn spawn(options: SpawnOptions) -> (Arc<PtySession>, Recorder) {
     let (tx, rx) = mpsc::channel();
     let session = PtySession::spawn(options, move |event| {
         let event = match event {
@@ -99,10 +163,14 @@ fn spawn(options: SpawnOptions) -> (PtySession, Recorder) {
         let _ = tx.send(event);
     })
     .expect("failed to spawn the shell");
+    let session = Arc::new(session);
     let recorder = Recorder {
         rx,
         output: Vec::new(),
         exit: None,
+        // Weak, so dropping the session in a test still kills the shell.
+        session: Arc::downgrade(&session),
+        queries: CursorQueries::default(),
     };
     (session, recorder)
 }
@@ -244,6 +312,13 @@ fn initial_size_and_resize_reach_the_shell() {
     assert_eq!(session.size().unwrap(), initial);
     session.write(command.as_bytes()).unwrap();
     rec.expect_output(&expected(initial));
+    // Wait for the next prompt before resizing. Before each prompt, bash's
+    // readline re-applies the window size it just read (`set_winsize` in
+    // rltty.c: TIOCGWINSZ, then TIOCSWINSZ with the same value). A resize
+    // landing between those two calls is overwritten with the old size;
+    // that is the shell's doing, not the pty's (macOS CI flake).
+    #[cfg(not(windows))]
+    rec.expect_output(&format!("{}\r\n$ ", expected(initial)));
 
     session.resize(resized).unwrap();
     assert_eq!(session.size().unwrap(), resized);
@@ -385,6 +460,7 @@ fn manager_routes_events_by_id_and_forgets_exited_sessions() {
         .unwrap();
 
     let mut outputs: std::collections::HashMap<PtyId, String> = Default::default();
+    let mut queries: std::collections::HashMap<PtyId, CursorQueries> = Default::default();
     let deadline = Instant::now() + TIMEOUT;
     while !(outputs.get(&first).is_some_and(|s| s.contains("first_one"))
         && outputs
@@ -393,6 +469,9 @@ fn manager_routes_events_by_id_and_forgets_exited_sessions() {
     {
         assert!(Instant::now() < deadline, "outputs so far: {outputs:?}");
         if let Ok((id, Some(bytes))) = rx.recv_timeout(Duration::from_millis(50)) {
+            for _ in 0..queries.entry(id).or_default().count(&bytes) {
+                let _ = manager.write(id, CURSOR_ANSWER);
+            }
             outputs
                 .entry(id)
                 .or_default()
