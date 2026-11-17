@@ -619,7 +619,16 @@ mod tests {
     /// Command that prints forever.
     fn flood_command() -> &'static [u8] {
         if cfg!(windows) {
-            b"for /L %i in (0,0,1) do @echo yyyyyyyyyyyyyyyy\r"
+            // cmd's loop is slow per iteration; long lines raise the
+            // throughput so the high-water mark is reached quickly.
+            concat!(
+                "for /L %i in (0,0,1) do @echo ",
+                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+                "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\r"
+            )
+            .as_bytes()
         } else {
             b"while :; do echo yyyyyyyyyyyyyyyy; done\r"
         }
@@ -675,12 +684,25 @@ mod tests {
 
         // Without acks: at most the high mark plus one read in flight.
         let bound = (termbay_core::pty::FLOW_HIGH_WATER as usize) + 64 * 1024;
+        // Wait until the output stops arriving (the reader paused), not for a
+        // fixed time: ConPTY on a CI runner can be much slower than a pty.
         let mut total = 0;
+        let mut quiet = Duration::ZERO;
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(1) || total == 0 {
-            assert!(started.elapsed() < TIMEOUT, "no output");
+        while total == 0 || quiet < Duration::from_millis(500) {
+            assert!(
+                started.elapsed() < 2 * TIMEOUT,
+                "the reader never paused ({total} bytes)"
+            );
             let window = Duration::from_millis(100);
-            total += pump(&bridge, id, &rx, &mut queries, window, false, &mut output);
+            let n = pump(&bridge, id, &rx, &mut queries, window, false, &mut output);
+            total += n;
+            quiet = if n == 0 {
+                quiet + window
+            } else {
+                Duration::ZERO
+            };
+            assert!(total <= bound, "{total} bytes without acks (bound {bound})");
         }
         assert!(total <= bound, "{total} bytes without acks (bound {bound})");
         assert!(
