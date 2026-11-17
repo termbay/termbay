@@ -277,6 +277,22 @@ shell saiu ou close/kill:
 
 **Critério de pronto:** `yes` por 10 s em 1 e em 4 painéis não trava a janela (digitar num quinto painel ecoa com p95 < 100 ms); Ctrl+C em cada painel devolve o prompt em menos de 1 s; a memória do app sobe menos de 100 MB sobre o repouso e volta perto dele depois.
 
+**Números da F2 (Felipe, 17/11/2026).** Duas partes, ambas versionadas:
+
+- *Vazão no core* (`core/tests/flow_load.rs`, `#[ignore]`; a CI roda com 2 s por cenário no Linux e no macOS e põe a tabela no resumo do job). `yes` num `/bin/sh` real, consumidor fazendo o papel da UI. MacBook (macOS 26, build de debug), 3 s por cenário:
+
+  | Cenário | MB/s | Máximo em voo |
+  |---|---:|---:|
+  | sem portão, consumidor instantâneo | 221,6 | — |
+  | 512 KiB, consumidor instantâneo | 228,8 | 11 KiB |
+  | 1 MiB, consumidor instantâneo | 225,6 | 11 KiB |
+  | 512 KiB, consumidor a 15 MB/s | 11,3 | 512 KiB |
+  | 1 MiB, consumidor a 15 MB/s | 11,4 | 1024 KiB |
+
+  Leitura: o portão não custa vazão quando a UI acompanha, e com uma UI lenta o atraso fica no ALTO, não cresce. 512 KiB e 1 MiB dão a mesma vazão, então fica 512 KiB (D6): metade do atraso para o Ctrl+C sem perda medida. O teste falha se o em voo passar do ALTO + 64 KiB, se a vazão com portão cair abaixo de metade da sem portão, ou se com consumidor lento a vazão não acompanhar o consumidor.
+- *No app* (`ui/e2e/specs/flow.test.mjs`, job `e2e` no Linux): 1 e 4 painéis em `yes` por 10 s, latência do eco num painel quieto (inclui a ida e volta do WebDriver), tempo do Ctrl+C até a saída do comando seguinte e memória (RSS do app e dos processos do WebKit) em repouso, sob carga e depois. Na CI só falha acima de 3x as metas (eco 300 ms, Ctrl+C 3 s) ou com mais de 100 MB de memória; os números vão para o resumo do job. **Ainda não rodou**: os números entram aqui depois do primeiro job verde.
+- *macOS e App Nap*: sem `tauri-driver` para o WKWebView, ficam no [roteiro manual](ROTEIRO-MANUAL.md) (seção "Controle de fluxo").
+
 ### 6.6 Atalhos (T11)
 
 **Regras:**

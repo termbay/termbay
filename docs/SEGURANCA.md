@@ -57,7 +57,7 @@ Um processo do **mesmo usuário** não é considerado adversário: ele já pode 
 | P5 | desempenho | O scanner para em todo ESC. Em saída colorida, isso custa cerca de 10% do tempo de CPU do caminho do pty no macOS, sem perda de vazão medida porque o pty é o gargalo. Numa máquina com pty mais rápido, a folga diminui | Ver números em [AUTOCOMPLETE.md](AUTOCOMPLETE.md), seção 10. Proposta: no estado normal, procurar o prefixo inteiro `ESC ] 6973 ;` com `memchr::memmem` (cerca de 10x mais rápido nessa saída) e tratar à parte só um prefixo partido no fim da leitura | Ana |
 | P6 | config | Avaliar `freezePrototype: true` | avaliado: fica `false`, motivo na seção 3 | Bruno |
 | P7 | doc | Registrar na `ARQUITETURA.md` o motivo do `dangerousDisableAssetCspModification` | ver seção 3. **Feito** (16/11/2026): linha "CSP dos estilos" na tabela de decisões, como proposto | Heitor |
-| P8 | teste | e2e com tauri-driver (Linux) do AC8: `ls fix` + Tab, Enter insere e não executa, Tab no vim vai para o vim, desligado = Tab nativo. Hoje isso está coberto por partes (core com shells reais, UI com Vitest), sem um teste do app inteiro | | Felipe |
+| P8 | teste | e2e com tauri-driver (Linux) do AC8: `ls fix` + Tab, Enter insere e não executa, Tab no vim vai para o vim, desligado = Tab nativo | **Escrito** (17/11/2026): `ui/e2e/specs/autocomplete.test.mjs`, rodado no job `e2e` da CI com zsh e com fish como shell de login. Ainda não visto verde: não há `tauri-driver` para macOS | Felipe |
 | P9 | futuro | `termbay serve`: só em `127.0.0.1`, com token de sessão; o WebSocket precisa do mesmo contrato do `pty_complete` sem abrir o gatilho a outra origem | | Ana, Felipe |
 
 ### P1 a P5: resolvidas (Ana, 16/11/2026)
@@ -83,3 +83,17 @@ Um processo do **mesmo usuário** não é considerado adversário: ele já pode 
   | Log colorido | 25,2 ms (9,5% do tempo do pty) | 4,1 ms (1,6%) |
   | Texto simples | 0,9 ms | 0,9 ms (sem mudança) |
 
+## 6. Revisão do marco 2 (abas, divisão, controle de fluxo)
+
+Felipe, 17/11/2026, sobre o commit `7eb3ac0`. Conferido lendo o código e rodando a suíte local (macOS); os e2e novos ainda não rodaram (só existem na CI de Linux e Windows).
+
+| Item | Situação | Onde está o teste |
+|---|---|---|
+| Capabilities: `allow-pty-info`, `allow-get-config` e `core:window:allow-close` só na `main` | ok. A capability `main` tem `"windows": ["main"]` e a lista exata de permissões; os comandos novos estão no `COMMANDS` do `build.rs` | `tests/config.rs` (`main_capability_grants_only_the_pty_commands_and_event_listening`, lista exata e janela `main`); `capability_allows_the_pty_commands_only_in_the_main_window` (`commands.rs`: `pty_info` e `get_config` recusados em outra janela) |
+| Validação do `cwd` no `pty_open` | ok. `valid_cwd`: não vazio, até 4096 bytes, absoluto e pasta existente; senão a pasta pessoal, sem erro. Teto de 64 ptys | `cwd_must_be_an_absolute_existing_directory` (`bridge.rs`); `pty_open_uses_a_valid_cwd_and_falls_back_to_home`, `pty_open_stops_at_the_limit_until_one_closes` (`commands.rs`) |
+| OSC 7 forjado não muda o diretório de um painel novo | ok. O `cwd` do próximo `open` vem só do `pty_info` (sistema operacional); o OSC 7 só muda o rótulo | `controller.test.ts` ("a forged OSC 7 changes the label, never the cwd of the next open") |
+| `pty_info` fora dos logs | ok. Nenhum `println`/`eprintln`/`console.*` com o resultado; o único `eprintln!` da ponte é o aviso de config | leitura de `commands.rs`, `bridge.rs` e `ui/src/layout/` |
+| Títulos e diálogo por `textContent` | ok. Nenhum `innerHTML` em `ui/src` fora de testes; título limpo de ESC, C0, C1 e bidirecionais | `title.test.ts`; `controller.test.ts` ("titles ... enter the DOM as text") |
+| Atalhos do WebView2 | ok, com ressalva. Ctrl+R/P/F/G/U, Ctrl+Shift+R/I/J/P, F5, F7 e F12 têm o padrão do navegador cancelado e continuam chegando ao xterm.js | `shortcuts.test.ts`; e2e do Windows (`tabs.test.mjs`: Ctrl+R chega ao shell, F5 não recarrega). Ressalva (suspeita, sem Windows aqui): a lista é manual; desligar `AreBrowserAcceleratorKeysEnabled` do WebView2 cobriria teclas novas de uma vez. Proposta ao Bruno, não bloqueia |
+| `tauri.conf.json` | ok. `freezePrototype: false` com motivo (seção 3) e o teste continua barrando afrouxamento | `prototype_freezing_stays_off` |
+| Build de e2e | o e2e troca o addon WebGL por um stub (`ui/vite.e2e.config.ts`) para ler o texto no DOM. O stub nunca pode ir para o release | `npm run check:release` depois de todo `npm run build` na CI (jobs `test` e `bundle`); conferido localmente: falha com o build de e2e, passa com o normal |

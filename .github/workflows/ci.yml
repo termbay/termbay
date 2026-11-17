@@ -2,6 +2,7 @@
 #
 # Jobs:
 #   test      lint and tests (Rust + UI) on macOS, Linux and Windows
+#   e2e       end-to-end tests with tauri-driver on Linux and Windows (T9, F1-F3)
 #   bundle    release build with the Tauri CLI, packages from decision D9,
 #             size report in the job summary, fails above SIZE_LIMIT_MB
 #   licenses  cargo-deny licenses, bans and sources, plus the npm license check
@@ -153,6 +154,11 @@ jobs:
         working-directory: ui
         run: npm run build
 
+      # The e2e build swaps the WebGL addon for a stub; it must never ship.
+      - name: Release UI has no e2e-only code
+        working-directory: ui
+        run: npm run check:release
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 
@@ -165,6 +171,138 @@ jobs:
         env:
           TERMBAY_REQUIRE_SHELLS: ${{ runner.os != 'Windows' && 'zsh,fish' || '' }}
         run: cargo test --workspace --locked
+
+      # F2: pty throughput with and without flow control, bytes in flight.
+      # Fails only on a large regression; the table goes to the job summary.
+      - name: Flow control load
+        if: runner.os != 'Windows'
+        env:
+          TERMBAY_FLOW_SECONDS: "2"
+        run: cargo test -p termbay-core --test flow_load --locked -- --ignored --nocapture
+
+  e2e:
+    name: e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    env:
+      TERMBAY_E2E_CONFIG: ${{ github.workspace }}/e2e-config.toml
+      TERMBAY_CONFIG: ${{ github.workspace }}/e2e-config.toml
+    steps:
+      - name: Keep LF line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # webkit2gtk-driver provides WebKitWebDriver, used by tauri-driver.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            webkit2gtk-driver xvfb zsh fish vim-tiny
+          # No zsh-newuser-install prompt when zsh becomes the login shell (P8).
+          touch ~/.zshrc
+
+      - name: Install Rust toolchain
+        id: rust
+        run: |
+          if [[ -f rust-toolchain.toml || -f rust-toolchain ]]; then
+            rustup show active-toolchain || rustup toolchain install
+          else
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          echo "rustc=$(rustc --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/bin/tauri-driver*
+            target/
+          key: cargo-e2e-${{ runner.os }}-${{ steps.rust.outputs.rustc }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-e2e-${{ runner.os }}-${{ steps.rust.outputs.rustc }}-
+
+      # tauri-driver: MIT OR Apache-2.0, only on the CI runner.
+      - name: Install tauri-driver
+        run: command -v tauri-driver || cargo install tauri-driver --locked
+
+      # msedgedriver must match the WebView2 runtime version exactly.
+      - name: Download msedgedriver for the installed WebView2
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).pv
+          if (-not $version) {
+            $version = (Get-Item "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe").VersionInfo.ProductVersion
+          }
+          Write-Output "WebView2 $version"
+          Invoke-WebRequest "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile "$env:RUNNER_TEMP\edgedriver.zip"
+          Expand-Archive "$env:RUNNER_TEMP\edgedriver.zip" -DestinationPath "$env:RUNNER_TEMP\edgedriver"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: npm ci
+        working-directory: ui
+        run: npm ci
+
+      # DOM renderer build (ui/vite.e2e.config.ts), embedded by a debug app
+      # built by the Tauri CLI (which serves the embedded assets, not devUrl).
+      - name: Build the e2e app
+        run: |
+          (cd ui && npm run build:e2e)
+          ui/node_modules/.bin/tauri build --ci --debug --no-bundle
+
+      - name: e2e (milestone 1, tabs, splits, flow control)
+        run: |
+          app="$PWD/target/debug/termbay"
+          driver_args=()
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            app="$(cygpath -w "$PWD/target/debug/termbay.exe")"
+            driver_args=(--native-driver "$(cygpath -w "$RUNNER_TEMP/edgedriver/msedgedriver.exe")")
+          else
+            Xvfb :99 -screen 0 1280x800x24 &
+            export DISPLAY=:99
+          fi
+          export TERMBAY_E2E_APP="$app"
+          tauri-driver "${driver_args[@]}" &
+          sleep 3
+          cd ui && npm run e2e
+
+      # P8: autocomplete in the whole app, with zsh and with fish as the login shell.
+      - name: e2e autocomplete (zsh and fish)
+        if: runner.os == 'Linux'
+        run: |
+          pkill -x tauri-driver || true
+          pkill -x Xvfb || true
+          sleep 1
+          Xvfb :99 -screen 0 1280x800x24 &
+          export DISPLAY=:99 TERMBAY_E2E_APP="$PWD/target/debug/termbay"
+          tauri-driver &
+          sleep 3
+          cd ui
+          for shell in zsh fish; do
+            sudo chsh -s "$(command -v "$shell")" "$USER"
+            TERMBAY_E2E_SHELL="$shell" node --test --test-concurrency=1 e2e/specs/autocomplete.test.mjs
+          done
 
   bundle:
     name: bundle and size (${{ matrix.os }})
@@ -238,6 +376,11 @@ jobs:
       - name: Build UI
         working-directory: ui
         run: npm run build
+
+      # The e2e build swaps the WebGL addon for a stub; it must never ship.
+      - name: Release UI has no e2e-only code
+        working-directory: ui
+        run: npm run check:release
 
       # Unsigned packages, only to measure and test (signing comes later).
       # Run from the repository root: the Tauri CLI finds app/src-tauri/tauri.conf.json.
