@@ -167,6 +167,15 @@ impl Running {
         }
     }
 
+    fn execs(&self) -> usize {
+        self.marks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| **m == ShellMark::Exec)
+            .count()
+    }
+
     fn prompts(&self) -> usize {
         self.marks
             .lock()
@@ -258,7 +267,30 @@ fn assert_nothing_drawn(output: &[u8]) {
 }
 
 /// Checks the answer to `ls fix` + trigger and returns the inserts.
-fn check_ls_fix(outcome: RequestOutcome) -> Vec<String> {
+/// Whether the shell reports names with a line break correctly: all but
+/// fish 3.3, which has no `complete --escape` and prints them split.
+fn reports_line_breaks(shell: &Running) -> bool {
+    let Some(info) = shell.link.info() else {
+        return true;
+    };
+    if info.shell != "fish" {
+        return true;
+    }
+    let mut parts = info
+        .version
+        .split('.')
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let (major, minor) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    (major, minor) >= (3, 4)
+}
+
+/// [`check_ls_fix`] on a new request, knowing the shell's limits.
+fn check_ls_fix_for(shell: &Running) -> Vec<String> {
+    let strict = reports_line_breaks(shell);
+    check_ls_fix(shell.complete(), strict)
+}
+
+fn check_ls_fix(outcome: RequestOutcome, strict: bool) -> Vec<String> {
     let RequestOutcome::Reply(reply) = outcome else {
         panic!("expected a reply, got {outcome:?}");
     };
@@ -270,11 +302,16 @@ fn check_ls_fix(outcome: RequestOutcome) -> Vec<String> {
     for item in &built.items {
         assert_eq!(item.kind, ItemKind::Shell);
         assert!(!item.text.chars().any(complete::is_unsafe), "{item:?}");
-        assert!(!item.insert.chars().any(complete::is_unsafe), "{item:?}");
-        assert!(item.text.starts_with("fix"), "{item:?}");
+        let after_dels = item.insert.trim_start_matches('\u{7f}');
+        assert!(!after_dels.chars().any(complete::is_unsafe), "{item:?}");
+        assert!(!strict || item.text.starts_with("fix"), "{item:?}");
     }
     let texts: Vec<&str> = built.items.iter().map(|i| i.text.as_str()).collect();
-    for expected in ["fix one.txt", "fix;semi", "fix nl", "fixdir/"] {
+    let mut names = vec!["fix one.txt", "fix;semi", "fixdir/"];
+    if strict {
+        names.push("fix nl");
+    }
+    for expected in names {
         assert!(
             texts.contains(&expected),
             "missing {expected:?} in {texts:?}"
@@ -295,7 +332,9 @@ fn check_ls_fix(outcome: RequestOutcome) -> Vec<String> {
     );
     // Every name arrived, the ones with a line break and an ESC included,
     // quoted by the shell so the insert has no control character.
-    assert_eq!(built.items.len(), 5, "{texts:?}");
+    if strict {
+        assert_eq!(built.items.len(), 5, "{texts:?}");
+    }
     built.items.iter().map(|i| i.insert.clone()).collect()
 }
 
@@ -437,11 +476,11 @@ fn zsh_integration() {
     shell.wait_until("the typed text is echoed", |s| s.output_contains("fix"));
     thread::sleep(Duration::from_millis(200));
     let mark = shell.visible.lock().unwrap().len();
-    let first = check_ls_fix(shell.complete());
+    let first = check_ls_fix_for(&shell);
     thread::sleep(Duration::from_millis(200));
     assert_nothing_drawn(&shell.visible.lock().unwrap()[mark..]);
     // The widget does not change the line: a second request sees the same.
-    let second = check_ls_fix(shell.complete());
+    let second = check_ls_fix_for(&shell);
     assert_eq!(first, second);
     shell.session.write(b"\x15").unwrap(); // Ctrl+U: clear the line.
     check_ignores_case(&shell);
@@ -522,7 +561,7 @@ fn zsh_without_compinit_or_zdotdir() {
     );
 
     shell.session.write(b"ls fix").unwrap();
-    check_ls_fix(shell.complete());
+    check_ls_fix_for(&shell);
     shell.session.write(b"\x15").unwrap();
     check_ignores_case(&shell);
 
@@ -554,8 +593,15 @@ fn zsh_without_compinit_or_zdotdir() {
     );
     // The Tab of the user is untouched: still no completion system, and no
     // style of ours left (Debian's /etc/zsh/zshrc sets styles of its own).
-    shell.run("print -r -- \"C=[${+functions[compdef]}] M=[$(zstyle -L | grep -c termbay)]\"");
-    assert!(shell.output_contains("C=[0] M=[0]"));
+    shell.run("print -r -- \"C=[${+functions[compdef]}] M=[$(zstyle -L | grep completion | grep -c termbay)]\"");
+    assert!(
+        shell.output_contains("C=[0] M=[0]"),
+        "{}",
+        String::from_utf8_lossy(&shell.visible.lock().unwrap())
+            .rsplit("C=[")
+            .next()
+            .unwrap_or("")
+    );
 }
 
 #[test]
@@ -611,10 +657,10 @@ fn fish_integration() {
     shell.wait_until("the typed text is echoed", |s| s.output_contains("fix"));
     thread::sleep(Duration::from_millis(200));
     let mark = shell.visible.lock().unwrap().len();
-    let first = check_ls_fix(shell.complete());
+    let first = check_ls_fix_for(&shell);
     thread::sleep(Duration::from_millis(200));
     assert_nothing_drawn(&shell.visible.lock().unwrap()[mark..]);
-    let second = check_ls_fix(shell.complete());
+    let second = check_ls_fix_for(&shell);
     assert_eq!(first, second);
     shell.session.write(b"\x15").unwrap();
     // fish's `complete --do-complete` already ignores case (and ranks exact
@@ -884,7 +930,7 @@ fn check_forged_output_is_ignored(shell: &Running, dir: &Path) {
 
     // The next completion is the shell's own answer, not a forged one.
     shell.session.write(b"ls fix").unwrap();
-    check_ls_fix(shell.complete());
+    check_ls_fix_for(shell);
     shell.session.write(b"\x15").unwrap();
 }
 
@@ -1156,12 +1202,10 @@ fn script_folder_refuses_unsafe_permissions() {
     assert_eq!(std::fs::read_to_string(&decoy).unwrap(), "echo decoy\n");
 }
 
-/// Desired behavior, not implemented yet (`docs/SEGURANCA.md`, pending
-/// items): a script with the right content but writable by others is kept
-/// as it is, so another local user could change it between the install and
-/// the start of a new tab when the folders are traversable (0755).
+/// A script with the right content but writable by others is written
+/// again (P3 in `docs/SEGURANCA.md`): with traversable folders (0755),
+/// another local user could otherwise change it before a new tab starts.
 #[test]
-#[ignore = "known gap: script file permissions are not checked (docs/SEGURANCA.md)"]
 fn script_files_writable_by_others_are_repaired() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1336,17 +1380,13 @@ fn completion_latency() {
     );
 }
 
-/// Known bug (`docs/SEGURANCA.md`, pending items): a line typed ahead while
-/// a command runs (`sleep 0.3` + Enter, then `cat` + Enter) is still in the
-/// terminal's input queue when the prompt mark of `sleep` arrives. The core
-/// then sees "at the prompt" until the `exec` mark of `cat` arrives, and a
-/// request in that window queues the trigger behind `cat\r`: `cat` reads
-/// the private characters as typed text. Reproduces 20 out of 20 times on
-/// macOS with zsh 5.9 (and with fish 4.7, swapping `zsh_session` for
-/// `fish_session`). In zsh the window is wider when the user's own `precmd`
-/// hooks are slow, because the integration's hook runs first.
+/// P1 in `docs/SEGURANCA.md`: a line typed ahead while a command runs
+/// (`sleep 0.3` + Enter, then `cat` + Enter) is still in the terminal's
+/// input queue when `sleep` ends. zsh sends the prompt mark only from zle
+/// with no pending input, so the core never sees "at the prompt" before
+/// `cat` starts. Here the input goes straight to the pty, so the core does
+/// not even know about the typeahead: the shell alone must get it right.
 #[test]
-#[ignore = "known bug: typeahead race between the prompt and exec marks (docs/SEGURANCA.md)"]
 fn typed_ahead_command_never_gets_the_trigger() {
     let tmp = TempDir::new("race");
     let Some((shell, _home)) = zsh_session(&tmp, "PS1='%% '\n") else {
@@ -1354,21 +1394,37 @@ fn typed_ahead_command_never_gets_the_trigger() {
     };
     for round in 0..5 {
         let from = shell.visible.lock().unwrap().len();
+        let execs = shell.execs();
         shell.session.write(b"sleep 0.3\r").unwrap();
-        shell.wait_until("sleep runs", |s| !s.link.is_at_prompt());
+        shell.wait_until("sleep runs", |s| s.execs() > execs);
         shell.session.write(b"cat\r").unwrap();
-        // A Tab pressed right after `sleep` ends.
+        // A Tab pressed as soon as the core believes the shell is at its
+        // prompt (busy wait, as fast as a request can come), or, when no
+        // prompt mark comes, 150 ms after `sleep` ended (its precmd printed
+        // the OSC 133 D mark). With the fix, the prompt mark only comes
+        // after `cat`, so the request is refused.
         let deadline = Instant::now() + TIMEOUT;
+        let mut ended: Option<Instant> = None;
         while !shell.link.is_at_prompt() {
+            if ended.is_none()
+                && String::from_utf8_lossy(&shell.visible.lock().unwrap()[from..])
+                    .contains("\x1b]133;D;0")
+            {
+                ended = Some(Instant::now());
+            }
+            if ended.is_some_and(|at| at.elapsed() > Duration::from_millis(150)) {
+                break;
+            }
             assert!(Instant::now() < deadline, "sleep did not end");
             std::hint::spin_loop();
         }
         let session = Arc::clone(&shell.session);
-        let _ = shell.link.request(
+        let outcome = shell.link.request(
             move |bytes| session.write(bytes).map_err(|e| e.to_string()),
             Duration::from_millis(300),
         );
-        thread::sleep(Duration::from_millis(300));
+        shell.wait_until("cat runs", |s| s.execs() > execs + 1);
+        thread::sleep(Duration::from_millis(200));
         let leaked = shell.visible.lock().unwrap()[from..]
             .windows(3)
             .any(|w| w == b"\xf4\x8f\xbf");
@@ -1376,5 +1432,201 @@ fn typed_ahead_command_never_gets_the_trigger() {
         shell.session.write(b"\r\x04").unwrap();
         shell.wait_until("the prompt after cat", |s| s.link.is_at_prompt());
         assert!(!leaked, "round {round}: `cat` received the trigger");
+        assert_eq!(outcome, RequestOutcome::Unavailable, "round {round}");
     }
+}
+
+/// P1 for fish, through the app's path: every key goes through the bridge,
+/// which tells the core about line breaks. fish cannot see pending input,
+/// so after typeahead the core waits until the prompt stays quiet
+/// (`TYPEAHEAD_SETTLE`); the typed-ahead `cat` starts first.
+#[test]
+fn fish_typed_ahead_command_never_gets_the_trigger() {
+    let tmp = TempDir::new("race-fish");
+    let Some((shell, _home)) = fish_session(&tmp, "") else {
+        return;
+    };
+    let type_keys = |s: &Running, keys: &[u8]| {
+        s.link.note_input(keys);
+        s.session.write(keys).unwrap();
+    };
+    for round in 0..5 {
+        let from = shell.visible.lock().unwrap().len();
+        let execs = shell.execs();
+        type_keys(&shell, b"sleep 0.3\r");
+        shell.wait_until("sleep runs", |s| s.execs() > execs);
+        let prompts = shell.prompts();
+        type_keys(&shell, b"cat\r");
+        // A Tab pressed right after the prompt mark of `sleep`.
+        let deadline = Instant::now() + TIMEOUT;
+        while shell.prompts() == prompts {
+            assert!(Instant::now() < deadline, "sleep did not end");
+            std::hint::spin_loop();
+        }
+        let session = Arc::clone(&shell.session);
+        let outcome = shell.link.request(
+            move |bytes| session.write(bytes).map_err(|e| e.to_string()),
+            Duration::from_millis(600),
+        );
+        shell.wait_until("cat runs", |s| s.execs() > execs + 1);
+        thread::sleep(Duration::from_millis(200));
+        let leaked = shell.visible.lock().unwrap()[from..]
+            .windows(3)
+            .any(|w| w == b"\xf4\x8f\xbf");
+        type_keys(&shell, b"\r\x04");
+        shell.wait_until("the prompt after cat", |s| s.link.is_at_prompt());
+        assert!(
+            !leaked,
+            "round {round}: `cat` received the trigger ({outcome:?})"
+        );
+        assert_eq!(outcome, RequestOutcome::Unavailable, "round {round}");
+    }
+    // Afterwards the prompt settles and completion works again.
+    shell.session.write(b"ls fix").unwrap();
+    check_ls_fix_for(&shell);
+}
+
+/// P2: the fish 3.3 path (no `complete --escape`), forced on this fish.
+/// Candidates are escaped by the script with `string escape`.
+#[test]
+fn fish_without_complete_escape() {
+    let Some(fish) = shell_or_skip("fish") else {
+        return;
+    };
+    let tmp = TempDir::new("fish-noescape");
+    let home = tmp.0.join("home");
+    std::fs::create_dir_all(home.join(".config").join("fish")).unwrap();
+    std::fs::write(
+        home.join(".config").join("fish").join("config.fish"),
+        "function fish_greeting; end\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(home.join("My Docs")).unwrap();
+    let work = make_work_dir(&tmp.0);
+    make_case_dir(&tmp.0);
+    let scripts = ScriptDir::install(&tmp.0.join("data")).unwrap();
+    let options = SpawnOptions {
+        shell: Some(ShellSpec::new(&fish)),
+        cwd: Some(work),
+        env: vec![
+            ("HOME".into(), home.clone().into()),
+            ("XDG_CONFIG_HOME".into(), home.join(".config").into()),
+            ("XDG_DATA_HOME".into(), home.join(".data").into()),
+            ("LANG".into(), "en_US.UTF-8".into()),
+            ("TERMBAY_TEST_FISH_NO_ESCAPE".into(), "1".into()),
+        ],
+        ..SpawnOptions::default()
+    };
+    let shell = Running::start(options, &scripts);
+    shell.wait_until("the first prompt", |s| s.link.is_at_prompt());
+    shell.session.write(b"ls fix").unwrap();
+    check_ls_fix(shell.complete(), false);
+    shell.session.write(b"\x15").unwrap();
+    check_ignores_case(&shell);
+    let items = items_for(&shell, "ls ~/My");
+    assert!(
+        items.iter().any(|(text, insert)| text == "~/My Docs/"
+            && insert == " Docs/".replace(' ', "\\ ").as_str()),
+        "{items:?}"
+    );
+}
+
+/// P4: the script folder is deleted while the app is open. The next spawn
+/// writes it again, so zsh still loads the user's .zshrc and integrates.
+#[test]
+fn deleted_scripts_are_written_again_before_a_spawn() {
+    let Some(zsh) = shell_or_skip("zsh") else {
+        return;
+    };
+    let tmp = TempDir::new("si-deleted");
+    let home = tmp.0.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join(".zshrc"), "PS1='%% '\nalias hi='echo HI_''RC'\n").unwrap();
+    let base = tmp.0.join("data");
+    let scripts = ScriptDir::install(&base).unwrap();
+    std::fs::remove_dir_all(base.join("termbay")).unwrap();
+    let options = SpawnOptions {
+        shell: Some(ShellSpec::new(&zsh)),
+        cwd: Some(home.clone()),
+        env: vec![
+            ("HOME".into(), home.clone().into()),
+            ("ZDOTDIR".into(), home.clone().into()),
+        ],
+        ..SpawnOptions::default()
+    };
+    let shell = Running::start(options, &scripts);
+    shell.wait_until("the first prompt", |s| s.link.is_at_prompt());
+    shell.run("hi");
+    assert!(
+        shell.output_contains("HI_RC"),
+        "the user's .zshrc was loaded"
+    );
+    assert!(scripts.root().join("zsh").join(".zshenv").is_file());
+}
+
+/// P4: when the scripts cannot be written again, the shell starts without
+/// integration (untouched options), never with a broken ZDOTDIR.
+#[test]
+fn unrepairable_scripts_leave_the_shell_untouched() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new("si-unrepairable");
+    let base = tmp.0.join("data");
+    let scripts = ScriptDir::install(&base).unwrap();
+    std::fs::remove_dir_all(scripts.root()).unwrap();
+    let parent = scripts.root().parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let mut options = SpawnOptions {
+        shell: Some(ShellSpec::new("/bin/zsh")),
+        ..SpawnOptions::default()
+    };
+    let before = format!("{options:?}");
+    let injected = inject(&mut options, &scripts);
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(injected.is_none());
+    assert_eq!(format!("{options:?}"), before);
+}
+
+/// P3: the data folder that holds `termbay/` must not be writable by others
+/// (unless it has the sticky bit, like /tmp). Group write is fine when the
+/// group is the user's own (Ubuntu's umask 002).
+#[test]
+fn a_shared_data_folder_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new("si-shared-base");
+    let base = tmp.0.join("data");
+    std::fs::create_dir_all(&base).unwrap();
+    for mode in [0o777, 0o757, 0o703] {
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(mode)).unwrap();
+        let err = ScriptDir::install(&base).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{mode:o}");
+    }
+    std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o1777)).unwrap();
+    ScriptDir::install(&base).unwrap();
+    // The temporary folder belongs to the user's primary group here.
+    std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o775)).unwrap();
+    ScriptDir::install(&base).unwrap();
+    std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptDir::install(&base).unwrap();
+}
+
+/// Letters typed ahead without Enter: zle-line-init sees pending input and
+/// waits; once zle has read them, the prompt mark comes from
+/// zle-line-pre-redraw and completion works on that line.
+#[test]
+fn zsh_letters_typed_ahead_still_complete() {
+    let tmp = TempDir::new("typeahead-letters");
+    let Some((shell, _home)) = zsh_session(
+        &tmp,
+        "PS1='%% '\nautoload -Uz compinit\ncompinit -u -C -d \"$HOME/.zcompdump\"\n",
+    ) else {
+        return;
+    };
+    let execs = shell.execs();
+    shell.session.write(b"sleep 0.3\r").unwrap();
+    shell.wait_until("sleep runs", |s| s.execs() > execs);
+    shell.session.write(b"ls fix").unwrap();
+    shell.wait_until("the prompt after sleep", |s| s.link.is_at_prompt());
+    check_ls_fix_for(&shell);
 }

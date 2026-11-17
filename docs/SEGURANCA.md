@@ -59,3 +59,27 @@ Um processo do **mesmo usuário** não é considerado adversário: ele já pode 
 | P7 | doc | Registrar na `ARQUITETURA.md` o motivo do `dangerousDisableAssetCspModification` | ver seção 3 | Heitor |
 | P8 | teste | e2e com tauri-driver (Linux) do AC8: `ls fix` + Tab, Enter insere e não executa, Tab no vim vai para o vim, desligado = Tab nativo. Hoje isso está coberto por partes (core com shells reais, UI com Vitest), sem um teste do app inteiro | | Felipe |
 | P9 | futuro | `termbay serve`: só em `127.0.0.1`, com token de sessão; o WebSocket precisa do mesmo contrato do `pty_complete` sem abrir o gatilho a outra origem | | Ana, Felipe |
+
+### P1 a P5: resolvidas (Ana, 16/11/2026)
+
+- **P1 (comando digitado antes da hora):**
+  - zsh: a marca `prompt` saiu do `precmd` e vai para o `zle-line-init` (via `add-zle-hook-widget`), só quando `$PENDING` é 0. Com letras pendentes sem Enter, ela sai no primeiro `zle-line-pre-redraw` sem nada pendente que não venha de um `accept-line`. Se um plugin trocar o despachante de hooks do zsh, o `precmd` volta a mandar a marca, como antes.
+  - fish: não há como ver a entrada pendente. O core cobre esse caso, porque toda tecla passa pela ponte. Um Enter enviado fora do prompt marca digitação antecipada, e então o pedido só sai depois de o prompt ficar 250 ms sem marca `exec` (`TYPEAHEAD_SETTLE`). O comando antecipado começa antes disso.
+  - A regra antiga continua valendo nos dois shells: depois de um Enter, só vale um `prompt` que chegue depois dele.
+  - Risco restante, só no fish: um `fish_prompt` que leve mais de 250 ms para desenhar.
+  - Testes: `typed_ahead_command_never_gets_the_trigger` (zsh, falha com o script anterior), `fish_typed_ahead_command_never_gets_the_trigger`, `zsh_letters_typed_ahead_still_complete` e `link.rs` (`after_typeahead_the_prompt_must_settle`).
+- **P2 (fish 3.3):** a versão mínima suportada passa a ser o fish 3.3; abaixo dela o script não manda o handshake, e o menu não aparece. No fish 3.3, sem `complete --escape`, o script escapa os candidatos com `string escape` (mantendo `~/`). Limitação: um nome com quebra de linha chega partido, como o fish 3.3 o imprime. A CI do Linux instala o fish 3.3.1 do Ubuntu 22.04 e o exige. Teste local do caminho: `fish_without_complete_escape`. Toda a suíte também passou num Ubuntu 22.04 com o fish 3.3.1.
+- **P3 (permissões):**
+  - um script é regravado se tiver outro dono ou puder ser escrito pelo grupo ou por outros;
+  - a pasta-base precisa ser do usuário (ou do root);
+  - escrita de outros só é aceita com sticky bit;
+  - escrita do grupo só quando o grupo é o principal do próprio usuário (o umask 002 do Ubuntu deixa `~/.local/share` em 0775).
+  - Testes: `script_files_writable_by_others_are_repaired`, `a_shared_data_folder_is_refused`.
+- **P4 (pasta apagada):** o `inject` confere e regrava os scripts antes de cada spawn. Se não conseguir, abre o shell sem integração. Testes: `deleted_scripts_are_written_again_before_a_spawn`, `unrepairable_scripts_leave_the_shell_untouched`.
+- **P5 (desempenho):** fora de uma sequência, o scanner faz um `memchr` de ESC e, a partir do primeiro ESC, um `memmem` do prefixo inteiro. Em 50 MB, no macOS (`scanner_cpu_cost`):
+
+  | Saída | Antes | Depois |
+  |---|---|---|
+  | Log colorido | 25,2 ms (9,5% do tempo do pty) | 4,1 ms (1,6%) |
+  | Texto simples | 0,9 ms | 0,9 ms (sem mudança) |
+

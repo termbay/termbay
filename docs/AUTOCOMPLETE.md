@@ -292,3 +292,7 @@ Os campos usam `\\` e `\xHH` (os scripts escapam `;`, os bytes menores que 0x20 
 - **Folga:** o scanner para em todo ESC, então numa saída colorida ele custa cerca de 10% do tempo de CPU do caminho. Um `memchr::memmem` do prefixo inteiro faz a mesma busca em 2,3–2,5 ms (cerca de 10x menos). Ver P5 em [SEGURANCA.md](SEGURANCA.md).
 - **Desligado:** o caminho é o mesmo de antes por construção (`ShellSupport::prepare` devolve `None`, sem scanner, e a saída vai direto ao batcher), e o teste `disabled_bridge_passes_private_sequences_through` confirma que até um OSC 6973 chega intacto à UI.
 - **Latência:** o tempo do próprio shell domina (`git ch` chama o `git`). Com a configuração real do Guilherme (zsh sem `compinit`, fish padrão), o p95 ficou entre 1,7 e 26,4 ms.
+
+**fish mínimo:** 3.3 (Ubuntu 22.04). O `complete --escape` só existe a partir do 3.4; no 3.3 o script escapa os candidatos com `string escape`, e nomes com quebra de linha chegam partidos. Abaixo do 3.3 não há integração.
+
+**Quando o shell está "no prompt":** no zsh, a marca `prompt` sai do `zle-line-init` (ou do primeiro `zle-line-pre-redraw`) sem entrada pendente, e não do `precmd`, para que um comando digitado antes da hora nunca receba o gatilho. No fish, o core espera o prompt ficar estável por 250 ms quando houve um Enter fora do prompt. Detalhes em [SEGURANCA.md](SEGURANCA.md), P1.

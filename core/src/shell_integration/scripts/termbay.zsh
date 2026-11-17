@@ -8,7 +8,8 @@
 #   - OSC 133 A, C and D (semantic prompt marks) and OSC 7 (working folder);
 #   - termbay's private OSC 6973, always with the session nonce:
 #       ready;<protocol>;zsh;<version>;<history file>   once, at the first prompt
-#       prompt;<exit code, or empty>                     before every prompt
+#       prompt;<exit code, or empty>                     when zle starts reading a
+#                                                        new command line (below)
 #       exec                                             before every command
 #       complete;<request>;<insert|command>;<line>;<cursor>;<word start>;
 #                [<text>;<insert>;<description>]...      answer to a request
@@ -62,7 +63,16 @@
 [[ -n "${_termbay_nonce-}" ]] || return 0
 
 typeset -g _termbay_req=''
-typeset -gi _termbay_ran=0 _termbay_ready=0
+typeset -gi _termbay_ran=0 _termbay_ready=0 _termbay_prompt_due=0 _termbay_hooked=0
+typeset -g _termbay_code=''
+
+# When is the shell "at the prompt"? Not in precmd: a command typed ahead
+# while the previous one ran (`cat` + Enter) is still in the terminal's
+# input queue then, and zle runs it right away. So the prompt mark is sent
+# from zle-line-init, only when no input is pending ($PENDING is 0), or
+# else from the first zle-line-pre-redraw with nothing pending that does
+# not follow an accept-line (typed-ahead letters without Enter). If a
+# plugin replaced zsh's hook dispatcher, precmd sends the mark as before.
 
 # UTF-8 bytes of the trigger characters, so the bindings work in any locale.
 typeset -ga _termbay_digit_keys=(
@@ -123,6 +133,45 @@ _termbay_digit() {
 
 # Binds the trigger in every keymap. Runs before every prompt, so keymaps
 # reset by a plugin or by `bindkey -e`/`-v` get the bindings back.
+_termbay_line_init() {
+  (( _termbay_prompt_due )) || return 0
+  (( PENDING )) && return 0
+  _termbay_prompt_due=0
+  _termbay_osc prompt "$_termbay_code"
+}
+
+_termbay_pre_redraw() {
+  (( _termbay_prompt_due )) || return 0
+  (( PENDING )) && return 0
+  [[ $LASTWIDGET == *accept* ]] && return 0
+  _termbay_prompt_due=0
+  _termbay_osc prompt "$_termbay_code"
+}
+
+# Hooks zle-line-init and zle-line-pre-redraw once, keeping the user's own
+# hook widgets (add-zle-hook-widget, zsh 5.3 or newer).
+_termbay_hook() {
+  (( _termbay_hooked )) && return 0
+  _termbay_hooked=1
+  autoload -Uz add-zle-hook-widget 2>/dev/null || return 0
+  add-zle-hook-widget line-init _termbay_line_init 2>/dev/null
+  add-zle-hook-widget line-pre-redraw _termbay_pre_redraw 2>/dev/null
+}
+
+# Whether both of our zle hooks will run: zsh's dispatcher is still in
+# place and lists them.
+_termbay_hooks_ok() {
+  emulate -L zsh
+  zmodload -i zsh/zleparameter 2>/dev/null || return 1
+  [[ ${widgets[zle-line-init]-} == user:azhw:zle-line-init ]] || return 1
+  [[ ${widgets[zle-line-pre-redraw]-} == user:azhw:zle-line-pre-redraw ]] || return 1
+  local -a list
+  zstyle -a zle-line-init widgets list
+  [[ -n ${(M)list:#<->:_termbay_line_init} ]] || return 1
+  zstyle -a zle-line-pre-redraw widgets list
+  [[ -n ${(M)list:#<->:_termbay_pre_redraw} ]] || return 1
+}
+
 _termbay_bind() {
   emulate -L zsh
   local km
@@ -153,9 +202,15 @@ _termbay_precmd() {
   fi
   _termbay_osc7
   if (( _termbay_ran )); then
-    _termbay_osc prompt "$ret"
+    _termbay_code=$ret
   else
-    _termbay_osc prompt ''
+    _termbay_code=''
+  fi
+  _termbay_hook
+  if _termbay_hooks_ok; then
+    _termbay_prompt_due=1
+  else
+    _termbay_osc prompt "$_termbay_code"
   fi
   _termbay_ran=0
   builtin print -rn -- $'\e]133;A\a'
@@ -164,6 +219,7 @@ _termbay_precmd() {
 _termbay_preexec() {
   emulate -L zsh
   _termbay_ran=1
+  _termbay_prompt_due=0
   _termbay_osc exec
   builtin print -rn -- $'\e]133;C\a'
 }

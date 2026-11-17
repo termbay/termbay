@@ -67,13 +67,11 @@ jobs:
 
       # Shells for the autocomplete integration tests (core/tests/shell_integration.rs).
       # less and vi are used by the "Tab goes to full-screen programs" check.
-      # fish is not installed here on purpose: Ubuntu 22.04 ships fish 3.3.1,
-      # whose `complete` has no `--escape`, so the integration returns no
-      # candidates there (known bug, docs/SEGURANCA.md). Add `fish` to this
-      # line and to TERMBAY_REQUIRE_SHELLS below once fish 3 is fixed.
-      - name: Install zsh (Linux)
+      # Ubuntu 22.04 ships fish 3.3.1, the oldest fish termbay supports (no
+      # `complete --escape` there; the script escapes the candidates itself).
+      - name: Install zsh and fish (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends zsh less vim-tiny
+        run: sudo apt-get install -y --no-install-recommends zsh fish less vim-tiny
 
       # Ubuntu's /etc/zsh/zshrc runs compinit, and some function directories
       # on the runner are group writable, so compinit stops and asks whether
@@ -162,10 +160,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       # A shell listed here that is missing fails the shell integration tests
-      # instead of skipping them silently: zsh and fish on macOS, zsh on Linux.
+      # instead of skipping them silently: zsh and fish on macOS and Linux.
       - name: cargo test
         env:
-          TERMBAY_REQUIRE_SHELLS: ${{ runner.os == 'macOS' && 'zsh,fish' || runner.os == 'Linux' && 'zsh' || '' }}
+          TERMBAY_REQUIRE_SHELLS: ${{ runner.os != 'Windows' && 'zsh,fish' || '' }}
         run: cargo test --workspace --locked
 
   bundle:

@@ -23,19 +23,38 @@
 # `complete -C` on the line up to the cursor. The answer goes out as the
 # private OSC; the command line and the screen are left untouched.
 #
+# Supported: fish 3.3 or newer (Ubuntu 22.04 ships 3.3.1). Older versions
+# get no integration (no handshake, so the menu never shows). fish 3.3 has
+# no `complete --escape` (new in 3.4): there the candidates are escaped with
+# `string escape`, and a name with a line break comes out split, as fish
+# 3.3 prints it.
+#
 # This file is termbay's own code. OSC 7 and OSC 133 (FinalTerm semantic
 # prompts) are public protocols; nothing here comes from Warp, iTerm2 or
 # kitty.
 
-if set -q TERMBAY_NONCE[1]; and status is-interactive
+set -l __termbay_major (string replace -r '^(\d+).*$' '$1' -- $version)
+set -l __termbay_minor (string replace -r '^\d+\.(\d+).*$' '$1' -- $version)
+set -l __termbay_supported 0
+if string match -qr '^\d+$' -- "$__termbay_major"; and string match -qr '^\d+$' -- "$__termbay_minor"
+    if test $__termbay_major -gt 3; or test $__termbay_major -eq 3 -a $__termbay_minor -ge 3
+        set __termbay_supported 1
+    end
+end
+
+if set -q TERMBAY_NONCE[1]; and status is-interactive; and test $__termbay_supported = 1
     set -g __termbay_nonce $TERMBAY_NONCE
     set -e TERMBAY_NONCE
     set -g __termbay_req ''
     set -g __termbay_ran 0
     set -g __termbay_status ''
     set -g __termbay_emit133 0
-    if test (string split -f1 . -- $version) -lt 4 2>/dev/null
-        set -g __termbay_emit133 1
+    test $__termbay_major -lt 4; and set -g __termbay_emit133 1
+    # `complete --escape` exists since fish 3.4. TERMBAY_TEST_FISH_NO_ESCAPE
+    # forces the fish 3.3 path (used by termbay's tests).
+    set -g __termbay_escape 1
+    if test $__termbay_major -eq 3 -a $__termbay_minor -lt 4; or set -q TERMBAY_TEST_FISH_NO_ESCAPE
+        set -g __termbay_escape 0
     end
 
     # Escapes each argument, one per line (no argument: no output).
@@ -118,7 +137,12 @@ if set -q TERMBAY_NONCE[1]; and status is-interactive
 
         if test $mode = insert
             set -l before (commandline -cp | string collect)
-            set -l found (complete --escape --do-complete="$before")
+            set -l found
+            if test $__termbay_escape = 1
+                set found (complete --escape --do-complete="$before")
+            else
+                set found (complete --do-complete="$before")
+            end
             set -l count 0
             set -l size 0
             for candidate in $found
@@ -129,7 +153,15 @@ if set -q TERMBAY_NONCE[1]; and status is-interactive
                 set -l description ''
                 set -q parts[2]; and set description $parts[2]
                 set -l text $insert
-                if string match -q -r '[\\\\\'"]' -- $insert
+                if test $__termbay_escape = 0
+                    # Unescaped candidate: escape it like --escape would,
+                    # keeping a leading "~/" as it is.
+                    if string match -q -- '~/*' $text
+                        set insert '~/'(string escape -n -- (string sub -s 3 -- $text))
+                    else
+                        set insert (string escape -n -- $text)
+                    end
+                else if string match -q -r '[\\\\\'"]' -- $insert
                     set text (string unescape -- $insert | string collect)
                 end
                 set size (math $size + (string length -- "$text$insert$description"))

@@ -91,6 +91,7 @@ enum State {
 #[derive(Debug)]
 pub struct OscScanner {
     nonce: Vec<u8>,
+    finder: memchr::memmem::Finder<'static>,
     state: State,
     body: Vec<u8>,
     max: usize,
@@ -106,6 +107,7 @@ impl OscScanner {
     pub fn with_limit(nonce: &Nonce, max: usize) -> Self {
         Self {
             nonce: nonce.as_str().as_bytes().to_vec(),
+            finder: memchr::memmem::Finder::new(PREFIX),
             state: State::Ground,
             body: Vec::new(),
             max: max.max(1),
@@ -128,17 +130,42 @@ impl OscScanner {
         let mut i = 0;
         while i < input.len() {
             match self.state {
-                State::Ground => match memchr::memchr(ESC, &input[i..]) {
-                    None => {
-                        out.extend_from_slice(&input[i..]);
+                // Search for the whole prefix at once (SIMD), instead of
+                // stopping at every ESC of a colored output. Only a prefix
+                // cut at the end of the chunk is held back.
+                State::Ground => {
+                    let rest = &input[i..];
+                    // Output without any ESC (plain text) needs only the
+                    // cheaper byte search.
+                    let Some(first_esc) = memchr::memchr(ESC, rest) else {
+                        out.extend_from_slice(rest);
                         i = input.len();
+                        continue;
+                    };
+                    let found = self
+                        .finder
+                        .find(&rest[first_esc..])
+                        .map(|offset| first_esc + offset);
+                    match found {
+                        Some(offset) => {
+                            out.extend_from_slice(&rest[..offset]);
+                            i += offset + PREFIX.len();
+                            self.body.clear();
+                            self.state = State::Body;
+                        }
+                        None => {
+                            let held = (1..PREFIX.len())
+                                .rev()
+                                .find(|&n| rest.ends_with(&PREFIX[..n]))
+                                .unwrap_or(0);
+                            out.extend_from_slice(&rest[..rest.len() - held]);
+                            i = input.len();
+                            if held > 0 {
+                                self.state = State::Prefix(held);
+                            }
+                        }
                     }
-                    Some(offset) => {
-                        out.extend_from_slice(&input[i..i + offset]);
-                        i += offset + 1;
-                        self.state = State::Prefix(1);
-                    }
-                },
+                }
                 State::Prefix(n) => {
                     if input[i] == PREFIX[n] {
                         i += 1;

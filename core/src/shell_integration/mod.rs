@@ -30,7 +30,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub use link::{COMPLETION_TIMEOUT, RequestOutcome, ShellLink, trigger_bytes};
+pub use link::{COMPLETION_TIMEOUT, RequestOutcome, ShellLink, TYPEAHEAD_SETTLE, trigger_bytes};
 pub use osc::{OscScanner, ShellInfo, ShellMark};
 pub use state::{Phase, ShellState};
 
@@ -61,7 +61,7 @@ const FILES: &[(&str, &str)] = &[
 /// A shell termbay can integrate with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShellKind {
-    /// fish 3.x or 4.x.
+    /// fish 3.3 or newer (older versions get no integration).
     Fish,
     /// zsh 5.x.
     Zsh,
@@ -162,6 +162,7 @@ pub struct Injection {
 /// The folder with the installed scripts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptDir {
+    base: PathBuf,
     root: PathBuf,
 }
 
@@ -180,6 +181,7 @@ impl ScriptDir {
             ));
         }
         std::fs::create_dir_all(base)?;
+        check_base(base)?;
         let mut dir = base.to_path_buf();
         for part in [
             "termbay",
@@ -196,7 +198,21 @@ impl ScriptDir {
             }
             write_if_changed(&path, content.as_bytes())?;
         }
-        Ok(Self { root: dir })
+        Ok(Self {
+            base: base.to_path_buf(),
+            root: dir,
+        })
+    }
+
+    /// Checks the installed files again and rewrites what is missing or
+    /// was changed (for example, the folder was deleted while the app was
+    /// open). [`inject`] calls it before every spawn.
+    pub fn refresh(&self) -> io::Result<()> {
+        let again = Self::install(&self.base)?;
+        if again.root != self.root {
+            return Err(io::Error::other("the script folder moved"));
+        }
+        Ok(())
     }
 
     /// [`ScriptDir::install`] in the user's data folder
@@ -248,6 +264,10 @@ pub fn default_data_dir() -> Option<PathBuf> {
 pub fn inject(options: &mut SpawnOptions, scripts: &ScriptDir) -> Option<Injection> {
     let spec = options.shell.clone().unwrap_or_else(default_shell);
     let kind = ShellKind::detect(&spec)?;
+    // A missing or tampered script would leave a broken shell (zsh with a
+    // ZDOTDIR that does not load the user's files): repair it, or start the
+    // shell without integration.
+    scripts.refresh().ok()?;
     let nonce = Nonce::generate().ok()?;
     let user_zdotdir = env_value(&options.env, "ZDOTDIR").or_else(|| std::env::var_os("ZDOTDIR"));
     apply(options, spec, kind, &nonce, scripts, user_zdotdir);
@@ -352,6 +372,43 @@ fn private_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The data folder that holds `termbay/`: a real folder of the current user
+/// (or of root) that nobody else can write to, so nobody else can replace
+/// the folders inside it. Writable by others is accepted only with the
+/// sticky bit (like `/tmp`); writable by the group only when it is the
+/// user's own primary group (Ubuntu's default umask 002 gives every user a
+/// private group and folders like `~/.local/share` in mode 0775).
+#[cfg(unix)]
+fn check_base(base: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = std::fs::metadata(base)?;
+    // SAFETY: geteuid and getegid have no preconditions and cannot fail.
+    let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    let sticky = metadata.mode() & 0o1000 != 0;
+    let others_write = metadata.mode() & 0o002 != 0;
+    let group_write = metadata.mode() & 0o020 != 0 && metadata.gid() != gid;
+    let shared = !sticky && (others_write || group_write);
+    if !metadata.is_dir() || (metadata.uid() != uid && metadata.uid() != 0) || shared {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{} must be a folder of the current user, not writable by others",
+                base.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn check_base(_base: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "shell integration is not available on this system yet",
+    ))
+}
+
 #[cfg(not(unix))]
 fn private_dir(_dir: &Path) -> io::Result<()> {
     Err(io::Error::new(
@@ -365,11 +422,17 @@ fn write_if_changed(path: &Path, content: &[u8]) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
+    use std::os::unix::fs::MetadataExt;
+
     if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.is_file() && std::fs::read(path)? == content {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        let private = metadata.is_file() && metadata.uid() == uid && metadata.mode() & 0o022 == 0;
+        if private && std::fs::read(path)? == content {
             return Ok(());
         }
-        // Wrong content, a symlink or something else: replace it.
+        // Wrong content, writable by others, another owner, a symlink or
+        // something else: replace it.
         std::fs::remove_file(path)?;
     }
     let mut file = std::fs::OpenOptions::new()
@@ -446,6 +509,7 @@ mod tests {
 
     fn scripts() -> ScriptDir {
         ScriptDir {
+            base: PathBuf::from("/data"),
             root: PathBuf::from("/data/termbay/si"),
         }
     }

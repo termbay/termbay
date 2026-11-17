@@ -13,6 +13,13 @@ use super::state::ShellState;
 /// `docs/AUTOCOMPLETE.md`, section 3).
 pub const COMPLETION_TIMEOUT: Duration = Duration::from_millis(1500);
 
+/// After a line break typed while a command ran (typeahead), how long the
+/// shell must stay at its prompt, with no `exec` mark, before a trigger is
+/// sent. A typed-ahead command is read right after the prompt shows, so its
+/// `exec` mark arrives first. zsh checks this itself ($PENDING); fish
+/// cannot see pending input, so this is its guard.
+pub const TYPEAHEAD_SETTLE: Duration = Duration::from_millis(250);
+
 /// First private-use character of the trigger: U+10FFF0 + digit types one
 /// digit of the request number.
 const TRIGGER_DIGIT_BASE: u32 = 0x10_FFF0;
@@ -56,6 +63,10 @@ struct Inner {
     waiting: Option<u64>,
     reply: Option<CompletionReply>,
     closed: bool,
+    /// A line break was sent while the shell was not at its prompt.
+    typeahead: bool,
+    /// When the last trusted prompt mark arrived.
+    prompt_at: Option<Instant>,
 }
 
 /// Shared state of one integrated pty: fed by the reader thread, queried
@@ -78,6 +89,8 @@ impl ShellLink {
                 waiting: None,
                 reply: None,
                 closed: false,
+                typeahead: false,
+                prompt_at: None,
             }),
             changed: Condvar::new(),
         }
@@ -101,6 +114,9 @@ impl ShellLink {
                 }
                 continue;
             }
+            if matches!(mark, ShellMark::Prompt { .. }) {
+                inner.prompt_at = Some(Instant::now());
+            }
             if inner.state.apply(&mark) {
                 first_ready = inner.state.info().cloned();
             }
@@ -114,7 +130,12 @@ impl ShellLink {
     /// running before its `exec` mark arrives.
     pub fn note_input(&self, data: &[u8]) {
         if data.iter().any(|&b| b == b'\r' || b == b'\n') {
-            self.lock().state.note_line_submitted();
+            let mut inner = self.lock();
+            if !inner.state.is_at_prompt() {
+                inner.typeahead = true;
+            }
+            inner.state.note_line_submitted();
+            drop(inner);
             self.changed.notify_all();
         }
     }
@@ -150,10 +171,34 @@ impl ShellLink {
     where
         W: FnOnce(&[u8]) -> Result<(), String>,
     {
+        let deadline = Instant::now() + timeout;
         let request = {
             let mut inner = self.lock();
             if inner.closed || !inner.state.is_at_prompt() {
                 return RequestOutcome::Unavailable;
+            }
+            // After typeahead, wait until the prompt has been quiet for a
+            // moment: a typed-ahead command would have started by then.
+            while inner.typeahead {
+                let settled = inner
+                    .prompt_at
+                    .map_or(Instant::now(), |at| at + TYPEAHEAD_SETTLE);
+                let now = Instant::now();
+                if now >= settled {
+                    inner.typeahead = false;
+                    break;
+                }
+                if now >= deadline {
+                    return RequestOutcome::Timeout;
+                }
+                inner = self
+                    .changed
+                    .wait_timeout(inner, settled.min(deadline) - now)
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0;
+                if inner.closed || !inner.state.is_at_prompt() {
+                    return RequestOutcome::Unavailable;
+                }
             }
             inner.last_request += 1;
             inner.waiting = Some(inner.last_request);
@@ -171,7 +216,6 @@ impl ShellLink {
             return RequestOutcome::Unavailable;
         }
 
-        let deadline = Instant::now() + timeout;
         let mut inner = self.lock();
         loop {
             if inner.waiting != Some(request) {
@@ -351,6 +395,56 @@ mod tests {
         );
         assert!(matches!(second, RequestOutcome::Reply(r) if r.request == 2));
         assert_eq!(handle.join().unwrap(), RequestOutcome::Cancelled);
+    }
+
+    #[test]
+    fn after_typeahead_the_prompt_must_settle() {
+        // `sleep` runs; `cat` + Enter is typed ahead.
+        let link = at_prompt();
+        link.note_input(b"sleep 1\r");
+        link.apply([ShellMark::Exec]);
+        link.note_input(b"cat\r");
+        // The prompt of `sleep` arrives, then (typeahead) `cat` starts.
+        link.apply([ShellMark::Prompt { exit_code: Some(0) }]);
+        let feeder = Arc::clone(&link);
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            feeder.apply([ShellMark::Exec]);
+        });
+        let outcome = link.request(
+            |_| panic!("the trigger must not reach `cat`"),
+            Duration::from_secs(10),
+        );
+        handle.join().unwrap();
+        assert_eq!(outcome, RequestOutcome::Unavailable);
+
+        // `cat` ends; this prompt stays quiet, so the request goes out
+        // after the settle time.
+        link.apply([ShellMark::Prompt { exit_code: Some(0) }]);
+        let start = Instant::now();
+        let feeder = Arc::clone(&link);
+        let outcome = link.request(
+            move |_| {
+                feeder.apply([reply(1)]);
+                Ok(())
+            },
+            Duration::from_secs(10),
+        );
+        assert!(matches!(outcome, RequestOutcome::Reply(_)), "{outcome:?}");
+        assert!(start.elapsed() >= TYPEAHEAD_SETTLE - Duration::from_millis(5));
+
+        // Without typeahead there is no wait.
+        let start = Instant::now();
+        let feeder = Arc::clone(&link);
+        let outcome = link.request(
+            move |_| {
+                feeder.apply([reply(2)]);
+                Ok(())
+            },
+            Duration::from_secs(10),
+        );
+        assert!(matches!(outcome, RequestOutcome::Reply(_)));
+        assert!(start.elapsed() < TYPEAHEAD_SETTLE);
     }
 
     #[test]
