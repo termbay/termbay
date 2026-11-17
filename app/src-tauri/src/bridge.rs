@@ -731,11 +731,14 @@ mod tests {
         // What was received while not acking is confirmed now.
         bridge.ack(id, u64::MAX);
         output.clear();
+        // ConPTY repaints the screen PowerShell filled and cmd prints its
+        // prompt again, which takes a few seconds on a CI runner.
+        let limit = Duration::from_secs(if cfg!(windows) { 5 } else { 1 });
         let started = Instant::now();
         while !String::from_utf8_lossy(&output).contains("ABCD") {
             assert!(
-                started.elapsed() < Duration::from_secs(1),
-                "the prompt did not come back in 1 s"
+                started.elapsed() < limit,
+                "the prompt did not come back in {limit:?}"
             );
             pump(
                 &bridge,
