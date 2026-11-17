@@ -464,7 +464,13 @@ mod tests {
         );
         let shell = options.shell.unwrap();
         assert_eq!(shell.program, PathBuf::from("/usr/bin/fish"));
-        let expected = format!("source '{}'", scripts().fish_script().display());
+        // Inside fish single quotes, `\` and `'` are escaped (Windows paths
+        // have backslashes).
+        let path = scripts().fish_script().display().to_string();
+        let expected = format!(
+            "source '{}'",
+            path.replace('\\', "\\\\").replace('\'', "\\'")
+        );
         assert_eq!(
             shell.args,
             [

@@ -75,6 +75,21 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install -y --no-install-recommends zsh less vim-tiny
 
+      # Ubuntu's /etc/zsh/zshrc runs compinit, and some function directories
+      # on the runner are group writable, so compinit stops and asks whether
+      # to "ignore insecure directories". Fix the permissions as a user would.
+      - name: Secure zsh function directories (Linux)
+        if: runner.os == 'Linux'
+        # compaudit prints insecure directories on stdout (the header goes to
+        # stderr) and exits 0 only when there are none.
+        run: |
+          insecure=$(zsh -fc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true)
+          if [ -n "$insecure" ]; then
+            echo "$insecure"
+            printf '%s\n' "$insecure" | xargs -d '\n' sudo chmod g-w,o-w
+          fi
+          zsh -fc 'autoload -Uz compaudit; compaudit'
+
       # zsh comes with macOS; fish 4 comes from Homebrew (about 30 s).
       - name: Install fish (macOS)
         if: runner.os == 'macOS'
