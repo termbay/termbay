@@ -65,6 +65,31 @@ jobs:
             libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
+      # Shells for the autocomplete integration tests (core/tests/shell_integration.rs).
+      # less and vi are used by the "Tab goes to full-screen programs" check.
+      # fish is not installed here on purpose: Ubuntu 22.04 ships fish 3.3.1,
+      # whose `complete` has no `--escape`, so the integration returns no
+      # candidates there (known bug, docs/SEGURANCA.md). Add `fish` to this
+      # line and to TERMBAY_REQUIRE_SHELLS below once fish 3 is fixed.
+      - name: Install zsh (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends zsh less vim-tiny
+
+      # zsh comes with macOS; fish 4 comes from Homebrew (about 30 s).
+      - name: Install fish (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+        run: brew install fish
+
+      - name: Shell versions
+        if: runner.os != 'Windows'
+        run: |
+          zsh --version
+          fish --version || true
+
       - name: Install Rust toolchain
         id: rust
         run: |
@@ -121,7 +146,11 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # A shell listed here that is missing fails the shell integration tests
+      # instead of skipping them silently: zsh and fish on macOS, zsh on Linux.
       - name: cargo test
+        env:
+          TERMBAY_REQUIRE_SHELLS: ${{ runner.os == 'macOS' && 'zsh,fish' || runner.os == 'Linux' && 'zsh' || '' }}
         run: cargo test --workspace --locked
 
   bundle:
