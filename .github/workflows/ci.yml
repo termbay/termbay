@@ -184,6 +184,9 @@ jobs:
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    # Windows e2e does not start yet (msedgedriver cannot reach WebView2:
+    # "DevToolsActivePort file doesn't exist"). Not blocking until fixed.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -211,6 +214,13 @@ jobs:
             webkit2gtk-driver xvfb zsh fish vim-tiny
           # No zsh-newuser-install prompt when zsh becomes the login shell (P8).
           touch ~/.zshrc
+          # Same as in the test job: otherwise compinit asks about insecure
+          # directories and eats the first keys the e2e tests type.
+          insecure=$(zsh -fc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true)
+          if [ -n "$insecure" ]; then
+            printf '%s\n' "$insecure" | xargs -d '\n' sudo chmod g-w,o-w
+          fi
+          zsh -fc 'autoload -Uz compaudit; compaudit'
 
       - name: Install Rust toolchain
         id: rust

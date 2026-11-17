@@ -678,15 +678,16 @@ mod tests {
 
         // Without acks: at most the high mark plus one read in flight.
         let bound = (termbay_core::pty::FLOW_HIGH_WATER as usize) + 64 * 1024;
-        // Wait until the output stops arriving (the reader paused), not for a
-        // fixed time: ConPTY on a CI runner can be much slower than a pty.
+        // Wait until most of the window arrived and the output stopped (the
+        // reader paused), not for a fixed time: ConPTY on a CI runner can be
+        // much slower than a pty, and PowerShell takes a while to start.
         let mut total = 0;
         let mut quiet = Duration::ZERO;
         let started = Instant::now();
-        while total == 0 || quiet < Duration::from_millis(500) {
+        while total < bound / 2 || quiet < Duration::from_millis(500) {
             assert!(
                 started.elapsed() < 2 * TIMEOUT,
-                "the reader never paused ({total} bytes)"
+                "the reader paused too early or never paused ({total} bytes)"
             );
             let window = Duration::from_millis(100);
             let n = pump(&bridge, id, &rx, &mut queries, window, false, &mut output);
