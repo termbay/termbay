@@ -13,6 +13,12 @@ use std::process::ExitCode;
 
 use termbay_core::cli::{self, Command};
 
+mod bridge;
+mod commands;
+mod complete;
+#[cfg(all(test, unix))]
+mod security_tests;
+
 fn main() -> ExitCode {
     let command = match cli::parse(std::env::args_os().skip(1)) {
         Ok(command) => command,
@@ -39,14 +45,25 @@ fn print_and_exit(text: &str) -> ExitCode {
 }
 
 fn run_app() -> ExitCode {
-    let result = tauri::Builder::default().run(tauri::generate_context!());
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
+    let app =
+        commands::register(tauri::Builder::default(), bridge::PtyBridge::new()).build(context());
+    match app {
+        Ok(app) => {
+            app.run(|app, event| commands::on_run_event(app, &event));
+            ExitCode::SUCCESS
+        }
         Err(err) => {
             let _ = writeln!(std::io::stderr(), "termbay: could not start the app: {err}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// The app's context (config, assets, capabilities), generated from
+/// `tauri.conf.json`. Kept in one place because the macro may only be
+/// expanded once per binary; the tests use it with the mock runtime.
+fn context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 mod console {

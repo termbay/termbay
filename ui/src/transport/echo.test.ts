@@ -54,3 +54,36 @@ describe("EchoPtyTransport", () => {
     expect(a.id).not.toBe(b.id);
   });
 });
+
+describe("EchoPtyTransport with a simulated shell", () => {
+  it("reports no integration and no completions by default", async () => {
+    const session = await new EchoPtyTransport().open({ cols: 80, rows: 24 });
+    const shells: unknown[] = [];
+    session.onShell((info) => shells.push(info));
+    expect(shells).toEqual([]);
+    expect(await session.complete()).toEqual({ status: "unavailable" });
+  });
+
+  it("announces the integration and completes from a fixed list, tracking the typed line", async () => {
+    const session = await new EchoPtyTransport({ simulateShell: true }).open({ cols: 80, rows: 24 });
+    const shells: unknown[] = [];
+    session.onShell((info) => shells.push(info));
+    expect(shells).toEqual([{ shell: "echo", protocol: 1 }]);
+
+    await session.write(enc("git chx\x7f"));
+    const result = await session.complete();
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect([result.line, result.cursor, result.replaceFrom]).toEqual(["git ch", 6, 4]);
+    expect(result.items.map((i) => [i.text, i.insert, i.kind])).toEqual([
+      ["checkout", "eckout", "shell"],
+      ["cherry-pick", "erry-pick", "shell"],
+      ["cherry", "erry", "shell"],
+      ["git checkout main", "eckout main", "history"],
+    ]);
+
+    await session.write(enc("\r"));
+    const empty = await session.complete();
+    expect(empty.status === "ok" && empty.line).toBe("");
+  });
+});

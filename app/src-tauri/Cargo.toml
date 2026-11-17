@@ -19,6 +19,13 @@ tauri-build = { version = "2.7", features = [] }
 [dependencies]
 termbay-core.workspace = true
 tauri = { version = "2.12", features = [] }
+# Already used by Tauri; listed only for `#[derive(Serialize)]` of event payloads.
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# `tauri::test`: mock runtime for the command tests. Adds no crate.
+tauri = { version = "2.12", features = ["test"] }
+serde_json = "1"
 
 # Lets `termbay --version` (and later `termbay hook`) print to the console
 # it was started from, even though release builds use the GUI subsystem.

@@ -3538,6 +3538,8 @@ dependencies = [
 name = "termbay"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "termbay-core",
@@ -3549,7 +3551,10 @@ name = "termbay-core"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "memchr",
  "portable-pty",
+ "serde",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]

@@ -1,0 +1,75 @@
+/* Autocomplete menu. Temporary palette, matching the terminal's, until T15 brings themes. */
+.termbay-autocomplete {
+  --termbay-ac-bg: #1f2229;
+  --termbay-ac-fg: #d6d9e0;
+  --termbay-ac-muted: #9aa1ad;
+  --termbay-ac-border: #3a3f4b;
+  --termbay-ac-selected-bg: #2f5d9e;
+  --termbay-ac-selected-fg: #ffffff;
+
+  position: absolute;
+  z-index: 10;
+  min-width: 12ch;
+  max-width: 60ch;
+  max-height: 16em;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 2px 0;
+  background: var(--termbay-ac-bg);
+  color: var(--termbay-ac-fg);
+  border: 1px solid var(--termbay-ac-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.termbay-autocomplete[hidden] {
+  display: none;
+}
+
+.termbay-autocomplete-heading {
+  padding: 2px 8px 0;
+  border-top: 1px solid var(--termbay-ac-border);
+  color: var(--termbay-ac-muted);
+  font-size: 0.85em;
+}
+
+.termbay-autocomplete-group:first-child .termbay-autocomplete-heading {
+  border-top: none;
+}
+
+.termbay-autocomplete-option {
+  display: flex;
+  gap: 2ch;
+  justify-content: space-between;
+  padding: 0 8px;
+}
+
+.termbay-autocomplete-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.termbay-autocomplete-description {
+  flex-shrink: 0;
+  color: var(--termbay-ac-muted);
+}
+
+.termbay-autocomplete-option[aria-selected="true"] {
+  background: var(--termbay-ac-selected-bg);
+  color: var(--termbay-ac-selected-fg);
+}
+
+.termbay-autocomplete-option[aria-selected="true"] .termbay-autocomplete-description {
+  color: inherit;
+}
+
+@media (forced-colors: active) {
+  .termbay-autocomplete-option[aria-selected="true"] {
+    outline: 2px solid Highlight;
+  }
+}

@@ -1,7 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Permissions of the main window. Intentionally empty in phase 1 (T1); the pty commands (pty_open, pty_write, pty_resize, pty_close) are added by T7, and nothing else (no shell, fs or http plugins).",
+  "description": "Permissions of the main window: only the pty commands (T7, plus `pty_complete` of the autocomplete) and listening to events (for `pty-exit` and `pty-shell`). No shell, fs or http plugins.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": [
+    "allow-pty-open",
+    "allow-pty-write",
+    "allow-pty-resize",
+    "allow-pty-close",
+    "allow-pty-ack",
+    "allow-pty-complete",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

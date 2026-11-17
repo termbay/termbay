@@ -5,7 +5,8 @@
  * - EchoPtyTransport (this folder): in-memory echo, for `npm run dev` and tests.
  * - TauriPtyTransport (T8): `pty_open` / `pty_write` / `pty_resize` / `pty_close`
  *   commands, one Tauri `Channel<ArrayBuffer>` per pty for raw output bytes,
- *   and the global `pty-exit` event.
+ *   the global `pty-exit` event, and for autocomplete the `pty_complete`
+ *   command and the global `pty-shell` event.
  * - WebSocket transport (browser mode, `termbay serve`, phase 2 or later):
  *   same contract over the local 127.0.0.1 server with a session token.
  *
@@ -30,6 +31,49 @@ export interface PtyExit {
   /** Process exit code, or null when killed by a signal / unknown. */
   readonly exitCode: number | null;
 }
+
+/**
+ * Shell integration became active in a pty (`pty-shell` event): the shell
+ * loaded termbay's script and sent its handshake. Only then can `complete`
+ * succeed. See docs/AUTOCOMPLETE.md, section 4.
+ */
+export interface ShellInfo {
+  /** "fish" | "zsh" in milestone A; more later. */
+  readonly shell: string;
+  /** Integration protocol version; the UI understands 1. */
+  readonly protocol: number;
+}
+
+/** One suggestion returned by `pty_complete`. */
+export interface CompletionItem {
+  /** Label shown in the menu. */
+  readonly text: string;
+  /**
+   * Insertion plan computed by the core against the `line`/`cursor` the shell
+   * reported: either the suffix to type after the cursor, or N x DEL (0x7f)
+   * followed by the replacement text.
+   */
+  readonly insert: string;
+  readonly description?: string;
+  readonly kind: "shell" | "history";
+}
+
+/** Result of `pty_complete`. */
+export type CompletionResult =
+  | {
+      readonly status: "ok";
+      /** Command line as the shell saw it when the request arrived. */
+      readonly line: string;
+      /** Cursor position in `line`. */
+      readonly cursor: number;
+      /** Start of the word being completed, in `line`. */
+      readonly replaceFrom: number;
+      readonly items: readonly CompletionItem[];
+    }
+  /** The shell is not at its prompt, or there is no integration: give the key to the shell. */
+  | { readonly status: "unavailable" }
+  /** The shell did not answer in time. */
+  | { readonly status: "timeout" };
 
 export interface PtySession {
   /** Opaque id assigned by the transport (the core's session id for Tauri). */
@@ -58,6 +102,18 @@ export interface PtySession {
 
   /** Fired once when the process ends (or the session is closed). */
   onExit(listener: (exit: PtyExit) => void): Disposable;
+
+  /**
+   * Asks the shell for completions of the current command line (`pty_complete`).
+   * A new request cancels the previous one.
+   */
+  complete(): Promise<CompletionResult>;
+
+  /**
+   * Fired when shell integration becomes active (`pty-shell`). A listener added
+   * after that is called at once. Never fires when autocomplete is disabled.
+   */
+  onShell(listener: (info: ShellInfo) => void): Disposable;
 }
 
 export interface PtyTransport {

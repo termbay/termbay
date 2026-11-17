@@ -10,6 +10,13 @@ authors.workspace = true
 
 [dependencies]
 portable-pty = "0.9"
+# Fast search for ESC in the pty output (shell integration scanner). Already
+# linked into the app through Tauri; MIT OR Unlicense.
+memchr = "2"
+# Minimal reading of `~/.termbay/config.toml` (the `[autocomplete]` section,
+# until T14). Both are already in the app through Tauri; MIT OR Apache-2.0.
+serde = { version = "1", features = ["derive"] }
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 # Used only to escalate to SIGKILL when a shell ignores SIGHUP.
 [target.'cfg(unix)'.dependencies]

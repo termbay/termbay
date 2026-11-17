@@ -5,7 +5,10 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type ITerminalOptions } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
+import { attachAutocomplete, type KeyHandler } from "../autocomplete/attach";
+import { detectOs, type Os } from "../platform/os";
 import type { Disposable, PtySession } from "../transport/types";
+import { createClipboardKeyHandler } from "./clipboard";
 import { connectPty } from "./connect";
 import { RendererController, type RendererKind } from "./renderer";
 
@@ -28,11 +31,14 @@ export class TerminalView implements Disposable {
   private readonly fit: FitAddon;
   private readonly renderer: RendererController<WebglAddon>;
   private readonly disposables: Disposable[] = [];
+  /** Autocomplete key handler, set only while shell integration is active. */
+  private autocompleteKeys: KeyHandler | null = null;
 
   constructor(
     private readonly container: HTMLElement,
     options: ITerminalOptions = {},
     onRendererChange?: (kind: RendererKind, reason?: unknown) => void,
+    os: Os = detectOs(),
   ) {
     this.term = new Terminal({ ...DEFAULT_TERMINAL_OPTIONS, ...options });
     this.fit = new FitAddon();
@@ -42,6 +48,9 @@ export class TerminalView implements Disposable {
     this.term.loadAddon(new Unicode11Addon());
     this.term.unicode.activeVersion = "11";
 
+    const clipboardKeys = createClipboardKeyHandler(this.term, os, globalThis.navigator?.clipboard);
+    // Autocomplete first: with its menu open, Ctrl/Cmd+key closes it and goes on.
+    this.term.attachCustomKeyEventHandler((ev) => (this.autocompleteKeys?.(ev) ?? true) && clipboardKeys(ev));
     this.term.open(container);
     // WebGL needs the terminal attached to the DOM first.
     this.renderer = new RendererController<WebglAddon>(this.term, () => new WebglAddon(), onRendererChange);
@@ -54,10 +63,16 @@ export class TerminalView implements Disposable {
       timer = setTimeout(() => this.fitNow(), RESIZE_DEBOUNCE_MS);
     });
     observer.observe(container);
+
+    // Clicking anywhere in the pane (including its padding) focuses the terminal.
+    const focusOnClick = () => this.term.focus();
+    container.addEventListener("mousedown", focusOnClick);
+
     this.disposables.push({
       dispose: () => {
         clearTimeout(timer);
         observer.disconnect();
+        container.removeEventListener("mousedown", focusOnClick);
       },
     });
   }
@@ -67,9 +82,25 @@ export class TerminalView implements Disposable {
   }
 
   attach(session: PtySession): Disposable {
-    const connection = connectPty(this.term, session);
-    this.disposables.push(connection);
-    return connection;
+    const autocomplete = attachAutocomplete(
+      {
+        term: this.term,
+        container: this.container,
+        setKeyHandler: (handler) => {
+          this.autocompleteKeys = handler;
+        },
+      },
+      session,
+    );
+    const connection = connectPty(this.term, autocomplete.session);
+    const both: Disposable = {
+      dispose: () => {
+        connection.dispose();
+        autocomplete.dispose();
+      },
+    };
+    this.disposables.push(both);
+    return both;
   }
 
   focus(): void {

@@ -18,6 +18,8 @@
 //!   process is left behind.
 //! - [`PtyManager`] keeps several sessions by [`PtyId`] (one per tab or
 //!   split pane) and forgets a session once its shell exits.
+//! - [`OutputBatcher`] and [`spawn_batcher`] group the output into fewer,
+//!   larger chunks for the UI (about 8 ms or 64 KiB per chunk).
 //!
 //! Every child gets `TERM=xterm-256color`, `COLORTERM=truecolor`,
 //! `TERM_PROGRAM=termbay` and `TERM_PROGRAM_VERSION=<termbay version>`.
@@ -37,11 +39,13 @@
 //! # Ok::<(), termbay_core::pty::PtyError>(())
 //! ```
 
+mod batch;
 mod error;
 mod manager;
 mod session;
 mod shell;
 
+pub use batch::{BatchLimits, BatchSender, OutputBatcher, spawn_batcher};
 pub use error::PtyError;
 pub use manager::{PtyId, PtyManager};
 pub use session::{ExitStatus, PtyEvent, PtySession, PtySize, SpawnOptions};
