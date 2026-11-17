@@ -37,8 +37,8 @@ webview2-com = "0.39"
 windows = { version = "0.62", default-features = false }
 
 [features]
-# e2e builds only: started by msedgedriver (which adds browser options
-# to the command line), unknown command line options open
+# e2e builds only: started by msedgedriver (which sets
+# WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS), unknown command line options open
 # the app instead of failing. Never enabled in release builds.
 e2e = []
 

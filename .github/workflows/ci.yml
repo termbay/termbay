@@ -297,6 +297,37 @@ jobs:
           fi
           export TERMBAY_E2E_APP="$app"
           tauri-driver "${driver_args[@]}" &
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # msedgedriver deletes its user data folders (where WebView2
+            # should write DevToolsActivePort) when a session fails, so
+            # snapshot them, their logs and the process owners while the
+            # tests run. Printed by "e2e diagnostics".
+            mkdir -p "$RUNNER_TEMP/webview2-watch"
+            cat > "$RUNNER_TEMP/webview2-watch.ps1" <<'PS'
+          $out = Join-Path $env:RUNNER_TEMP 'webview2-watch'
+          for ($i = 0; $i -lt 120; $i++) {
+            $log = Join-Path $out 'snapshots.txt'
+            "=== $(Get-Date -Format o)" | Add-Content $log
+            Get-CimInstance Win32_Process |
+              Where-Object { $_.Name -match 'termbay|msedge' } |
+              ForEach-Object {
+                $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwner
+                "$($_.ProcessId) $($_.Name) owner=$($owner.Domain)\$($owner.User) session=$($_.SessionId) $($_.CommandLine)"
+              } | Add-Content $log
+            foreach ($root in @("$env:SystemRoot\SystemTemp", $env:TEMP)) {
+              Get-ChildItem $root -Directory -Filter 'scoped_dir*' -ErrorAction SilentlyContinue | ForEach-Object {
+                Get-ChildItem $_.FullName -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+                  ForEach-Object { $_.FullName } | Add-Content $log
+                Get-ChildItem $_.FullName -Recurse -Include 'DevToolsActivePort','*.log' -ErrorAction SilentlyContinue |
+                  ForEach-Object { Copy-Item $_.FullName (Join-Path $out ($_.Directory.Name + '-' + $_.Name)) -ErrorAction SilentlyContinue }
+              }
+            }
+            Start-Sleep -Seconds 5
+          }
+          PS
+            pwsh -NoProfile -File "$(cygpath -w "$RUNNER_TEMP/webview2-watch.ps1")" &
+            whoami
+          fi
           sleep 3
           cd ui && npm run e2e
 
@@ -312,10 +343,13 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             echo "--- app data directory"
             ls -laR "$LOCALAPPDATA/io.github.termbay.termbay" 2>/dev/null | head -50 || true
-            echo "--- msedgedriver user data directories"
-            find "$TEMP" -maxdepth 2 -iname 'scoped_dir*' 2>/dev/null | head -20 || true
-            find "$TEMP" -maxdepth 4 -name DevToolsActivePort 2>/dev/null || true
-            tasklist | grep -i -E 'termbay|msedge' || true
+            echo "--- WebView2 snapshots taken during the tests"
+            head -c 200000 "$RUNNER_TEMP/webview2-watch/snapshots.txt" 2>/dev/null || echo "(none)"
+            for f in "$RUNNER_TEMP"/webview2-watch/*; do
+              [[ "$f" == */snapshots.txt ]] && continue
+              echo "--- $f"
+              tail -n 80 "$f" || true
+            done
           fi
 
       # P8: autocomplete in the whole app, with zsh and with fish as the login shell.

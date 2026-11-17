@@ -716,7 +716,7 @@ mod tests {
         }
 
         // Stop acking so the reader pauses, then Ctrl+C: with acks again,
-        // the prompt is back in less than a second.
+        // the flood stops and the shell answers.
         pump(
             &bridge,
             id,
@@ -727,18 +727,45 @@ mod tests {
             &mut output,
         );
         bridge.write(id, b"\x03".to_vec()).unwrap();
-        bridge.write(id, echo_marker().to_vec()).unwrap();
         // What was received while not acking is confirmed now.
         bridge.ack(id, u64::MAX);
+        // First the flood must stop: the output goes quiet once ConPTY has
+        // repainted the screen and cmd printed its prompt. Typing the marker
+        // only then keeps two failures apart: a flood that ignores Ctrl+C
+        // (a bug) and type-ahead that PowerShell discards when it exits on
+        // Ctrl+C (not ours; nobody types into a dying flood in practice).
+        let tail = |output: &[u8]| {
+            let text = String::from_utf8_lossy(output);
+            let chars: Vec<char> = text.chars().collect();
+            let start = chars.len().saturating_sub(300);
+            chars[start..].iter().collect::<String>()
+        };
+        let limit = Duration::from_secs(if cfg!(windows) { 15 } else { 2 });
+        let started = Instant::now();
+        let mut quiet = Duration::ZERO;
+        while quiet < Duration::from_millis(500) {
+            assert!(
+                started.elapsed() < limit,
+                "the flood did not stop after Ctrl+C within {limit:?}; output tail: {:?}",
+                tail(&output)
+            );
+            let window = Duration::from_millis(100);
+            let n = pump(&bridge, id, &rx, &mut queries, window, true, &mut output);
+            quiet = if n == 0 {
+                quiet + window
+            } else {
+                Duration::ZERO
+            };
+        }
         output.clear();
-        // ConPTY repaints the screen PowerShell filled and cmd prints its
-        // prompt again, which takes a few seconds on a CI runner.
+        bridge.write(id, echo_marker().to_vec()).unwrap();
         let limit = Duration::from_secs(if cfg!(windows) { 5 } else { 1 });
         let started = Instant::now();
         while !String::from_utf8_lossy(&output).contains("ABCD") {
             assert!(
                 started.elapsed() < limit,
-                "the prompt did not come back in {limit:?}"
+                "the shell did not answer within {limit:?} after the flood stopped; output tail: {:?}",
+                tail(&output)
             );
             pump(
                 &bridge,

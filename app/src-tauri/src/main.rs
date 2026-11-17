@@ -41,22 +41,14 @@ fn main() -> ExitCode {
     }
 }
 
-/// Variable that `msedgedriver` may set when it starts the app for the e2e
-/// tests.
+/// Variable that `msedgedriver` sets when it starts the app for the e2e
+/// tests (with the browser options, including the DevTools port).
 const WEBVIEW_DRIVER_ENV: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
 
 /// Only e2e builds (`--features e2e`) started by the WebView2 driver
-/// tolerate unknown options; release builds always reject them. The driver
-/// is recognised by its variable or by the DevTools option it puts in the
-/// command line, since not every `msedgedriver` version sets the variable.
+/// tolerate unknown options; release builds always reject them.
 fn launched_by_webview_driver() -> bool {
-    cfg!(feature = "e2e")
-        && (std::env::var_os(WEBVIEW_DRIVER_ENV).is_some()
-            || std::env::args_os().any(|arg| is_driver_option(&arg)))
-}
-
-fn is_driver_option(arg: &std::ffi::OsStr) -> bool {
-    arg.to_string_lossy().starts_with("--remote-debugging-")
+    cfg!(feature = "e2e") && std::env::var_os(WEBVIEW_DRIVER_ENV).is_some()
 }
 
 /// [`cli::parse`], except that with `driver` set the browser options the
@@ -83,9 +75,10 @@ fn print_and_exit(text: &str) -> ExitCode {
 fn run_app() -> ExitCode {
     let builder = tauri::Builder::default().setup(|app| {
         disable_browser_keys(app);
-        e2e_log::write("setup finished");
+        e2e_log::setup(app);
         Ok(())
     });
+    let builder = e2e_log::on_page_load(builder);
     // Replaces Tauri's default macOS menu, whose "Close Window" takes Cmd+W.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(menu::build);
@@ -93,7 +86,10 @@ fn run_app() -> ExitCode {
     match app {
         Ok(app) => {
             e2e_log::write("app built, entering the event loop");
-            app.run(|app, event| commands::on_run_event(app, &event));
+            app.run(|app, event| {
+                e2e_log::run_event(&event);
+                commands::on_run_event(app, &event);
+            });
             e2e_log::write("event loop finished");
             ExitCode::SUCCESS
         }
@@ -129,8 +125,12 @@ fn disable_browser_keys(app: &tauri::App) {
                 .and_then(|settings| settings.cast::<ICoreWebView2Settings3>())
                 .and_then(|settings| settings.SetAreBrowserAcceleratorKeysEnabled(false))
         };
-        if let Err(err) = result {
-            eprintln!("termbay: could not turn off the browser keys: {err}");
+        match result {
+            Ok(()) => e2e_log::write("webview ready, browser keys off"),
+            Err(err) => {
+                e2e_log::write(&format!("could not turn off the browser keys: {err}"));
+                eprintln!("termbay: could not turn off the browser keys: {err}");
+            }
         }
     });
 }
@@ -168,6 +168,60 @@ mod e2e_log {
 
     #[cfg(not(feature = "e2e"))]
     pub fn write(_line: &str) {}
+
+    /// Logs the page loads of every webview (e2e builds only).
+    pub fn on_page_load<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+        if !cfg!(feature = "e2e") {
+            return builder;
+        }
+        builder.on_page_load(|webview, payload| {
+            write(&format!(
+                "page {:?} in {}: {}",
+                payload.event(),
+                webview.label(),
+                payload.url()
+            ));
+        })
+    }
+
+    /// Logs the end of setup, whether the main window exists, and that the
+    /// process is still alive a while later (the driver waits 60 s).
+    pub fn setup(app: &tauri::App) {
+        if !cfg!(feature = "e2e") {
+            return;
+        }
+        use tauri::Manager;
+        let window = app.get_webview_window(crate::commands::MAIN_WINDOW);
+        write(&format!(
+            "setup finished, main window: {}",
+            window.is_some()
+        ));
+        std::thread::spawn(|| {
+            for (wait, total) in [(5, 5), (10, 15), (30, 45)] {
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                write(&format!("alive after {total} s"));
+            }
+        });
+    }
+
+    pub fn run_event(event: &tauri::RunEvent) {
+        if !cfg!(feature = "e2e") {
+            return;
+        }
+        match event {
+            tauri::RunEvent::Ready => write("event loop ready"),
+            tauri::RunEvent::ExitRequested { code, .. } => {
+                write(&format!("exit requested (code {code:?})"));
+            }
+            tauri::RunEvent::Exit => write("exit"),
+            tauri::RunEvent::WindowEvent { label, event, .. } => {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    write(&format!("window {label} destroyed"));
+                }
+            }
+            _ => {}
+        }
+    }
 
     pub fn start() {
         if !cfg!(feature = "e2e") {
@@ -238,13 +292,5 @@ mod tests {
         if !cfg!(feature = "e2e") {
             assert!(!launched_by_webview_driver());
         }
-    }
-
-    #[test]
-    fn devtools_options_identify_the_driver() {
-        assert!(is_driver_option("--remote-debugging-port=0".as_ref()));
-        assert!(is_driver_option("--remote-debugging-pipe".as_ref()));
-        assert!(!is_driver_option("--bogus".as_ref()));
-        assert!(!is_driver_option("--user-data-dir=C:\\tmp".as_ref()));
     }
 }
