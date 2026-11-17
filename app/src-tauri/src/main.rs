@@ -82,7 +82,9 @@ fn run_app() -> ExitCode {
     // Replaces Tauri's default macOS menu, whose "Close Window" takes Cmd+W.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(menu::build);
-    let app = commands::register(builder, bridge::PtyBridge::new()).build(context());
+    let mut context = context();
+    pass_driver_browser_args(&mut context);
+    let app = commands::register(builder, bridge::PtyBridge::new()).build(context);
     match app {
         Ok(app) => {
             e2e_log::write("app built, entering the event loop");
@@ -143,6 +145,32 @@ fn disable_browser_keys(_app: &tauri::App) {}
 /// expanded once per binary; the tests use it with the mock runtime.
 fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
+}
+
+/// WebView2's own default switches, which wry uses when a window sets none.
+const WEBVIEW2_DEFAULT_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// The WebView2 driver (`msedgedriver`) passes `--remote-debugging-port`
+/// and friends in `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, but the browser
+/// arguments wry sets for every window win over that variable, so the
+/// driver never finds DevTools. e2e builds hand the driver's switches to
+/// the windows explicitly; release builds ignore the variable.
+fn pass_driver_browser_args<R: tauri::Runtime>(context: &mut tauri::Context<R>) {
+    if !cfg!(feature = "e2e") {
+        return;
+    }
+    let Some(driver) = std::env::var(WEBVIEW_DRIVER_ENV).ok() else {
+        return;
+    };
+    for window in &mut context.config_mut().app.windows {
+        let args = browser_args(window.additional_browser_args.as_deref(), &driver);
+        window.additional_browser_args = Some(args);
+    }
+}
+
+fn browser_args(window: Option<&str>, driver: &str) -> String {
+    format!("{} {driver}", window.unwrap_or(WEBVIEW2_DEFAULT_ARGS))
 }
 
 /// Startup diagnostics for e2e builds: with `TERMBAY_E2E_LOG` set, the
@@ -292,5 +320,17 @@ mod tests {
         if !cfg!(feature = "e2e") {
             assert!(!launched_by_webview_driver());
         }
+    }
+
+    #[test]
+    fn driver_browser_args_keep_the_window_args() {
+        assert_eq!(
+            browser_args(None, "--remote-debugging-port=0"),
+            format!("{WEBVIEW2_DEFAULT_ARGS} --remote-debugging-port=0")
+        );
+        assert_eq!(
+            browser_args(Some("--lang=pt-BR"), "--remote-debugging-port=0"),
+            "--lang=pt-BR --remote-debugging-port=0"
+        );
     }
 }
