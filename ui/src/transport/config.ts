@@ -8,11 +8,17 @@ export interface AppConfig {
     readonly trigger: Trigger;
     readonly history: boolean;
   };
+  /** `[office]` (decision E9). */
+  readonly office: {
+    /** Opens the panel by itself on the first agent event (`auto_open`). */
+    readonly autoOpen: boolean;
+  };
 }
 
 /** Defaults, also used outside Tauri (echo transport) and when the answer is malformed. */
 export const DEFAULT_CONFIG: AppConfig = {
   autocomplete: { enabled: false, trigger: "tab", history: true },
+  office: { autoOpen: true },
 };
 
 /**
@@ -28,13 +34,18 @@ export async function loadConfig(ipc?: TauriIpc): Promise<AppConfig> {
   } catch (error) {
     throw toError(error);
   }
-  const ac = (raw as { autocomplete?: Record<string, unknown> } | null)?.autocomplete ?? {};
+  const sections = raw as { autocomplete?: Record<string, unknown>; office?: Record<string, unknown> } | null;
+  const ac = sections?.autocomplete ?? {};
+  const office = sections?.office ?? {};
   const d = DEFAULT_CONFIG.autocomplete;
   return {
     autocomplete: {
       enabled: typeof ac.enabled === "boolean" ? ac.enabled : d.enabled,
       trigger: ac.trigger === "tab" || ac.trigger === "ctrl+space" ? ac.trigger : d.trigger,
       history: typeof ac.history === "boolean" ? ac.history : d.history,
+    },
+    office: {
+      autoOpen: typeof office.auto_open === "boolean" ? office.auto_open : DEFAULT_CONFIG.office.autoOpen,
     },
   };
 }

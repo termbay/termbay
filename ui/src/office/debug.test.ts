@@ -35,15 +35,12 @@ describe("formatAgent", () => {
 describe("OfficeDebugList", () => {
   it("lists the picture, then the changes with the names it learned", () => {
     const panel = document.createElement("aside");
-    panel.hidden = true;
     const list = new OfficeDebugList(panel);
-    // An empty office does not open the panel.
     list.snapshot(snapshot([]));
-    expect(panel.hidden).toBe(true);
+    expect(panel.querySelectorAll("li").length).toBe(0);
 
     list.snapshot(snapshot([{ session: "s1", agents: [{ id: "a1", name: "ana", activity: "working" }], tasks: [] }]));
     list.event(event({ agent: "a1", action: "reading", target: "x.ts" }));
-    expect(panel.hidden).toBe(false);
     expect([...panel.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["here · ana · working", "tool · ana · reading · x.ts"]);
   });
 
@@ -58,8 +55,8 @@ describe("OfficeDebugList", () => {
     expect(items.length).toBe(DEBUG_LINES);
     expect(items[items.length - 1]?.textContent).toContain(`T${DEBUG_LINES + 9}`);
 
-    list.toggle();
-    expect(panel.hidden).toBe(true);
+    list.destroy();
+    expect(panel.querySelector("ol")).toBeNull();
   });
 });
 
