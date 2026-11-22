@@ -481,9 +481,20 @@ jobs:
               test -x target/release/bundle/macos/termbay.app/Contents/MacOS/termbay-hook
               ;;
             Linux)
-              for deb in target/release/bundle/deb/*.deb; do dpkg-deb -c "$deb" | grep -E ' \./usr/bin/termbay-hook$'; done
+              debs=(target/release/bundle/deb/*.deb)
+              [[ ${#debs[@]} -gt 0 ]] || { echo "error: no .deb was built" >&2; exit 1; }
+              for deb in "${debs[@]}"; do
+                # Last column of `dpkg-deb -c` is the path (./usr/bin/...).
+                files="$(dpkg-deb -c "$deb" | awk '{print $NF}')"
+                echo "== $deb, usr/bin:"; grep '/usr/bin/' <<<"$files" || true
+                grep -qx './usr/bin/termbay-hook' <<<"$files" || { echo "error: termbay-hook is not in $deb" >&2; exit 1; }
+              done
               if command -v rpm >/dev/null; then
-                for r in target/release/bundle/rpm/*.rpm; do rpm -qlp "$r" | grep -x /usr/bin/termbay-hook; done
+                for r in target/release/bundle/rpm/*.rpm; do
+                  files="$(rpm -qlp "$r")"
+                  echo "== $r, usr/bin:"; grep '/usr/bin/' <<<"$files" || true
+                  grep -qx '/usr/bin/termbay-hook' <<<"$files" || { echo "error: termbay-hook is not in $r" >&2; exit 1; }
+                done
               else
                 echo "rpm not installed; the .rpm is built from the same file list as the .deb"
               fi
