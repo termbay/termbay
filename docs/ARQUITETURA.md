@@ -94,19 +94,23 @@ termbay/
 O escritório não conhece o formato do Claude Code, só este formato próprio. Os hooks são traduzidos pelo core.
 
 ```json
-{ "v": 1, "sessao": "s1", "agente": "Ana", "tipo": "inicio",     "cargo": "backend" }
-{ "v": 1, "sessao": "s1", "agente": "Ana", "tipo": "ferramenta", "acao": "lendo", "alvo": "src/api.ts" }
-{ "v": 1, "sessao": "s1", "agente": "Ana", "tipo": "mensagem",   "para": "Bruno", "texto": "terminei a API" }
-{ "v": 1, "sessao": "s1", "agente": "Ana", "tipo": "fim",        "resultado": "ok" }
+{ "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "start",   "role": "backend" }
+{ "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "tool",    "action": "reading", "target": "api.ts" }
+{ "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "message", "to": "Bruno", "text": "terminei a API" }
+{ "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "end",     "result": "ok" }
 ```
 
-| tipo         | no escritório                                            |
-|--------------|----------------------------------------------------------|
-| `inicio`     | o funcionário chega e senta na mesa                      |
-| `ferramenta` | animação e balão ("lendo api.ts", "rodando testes")      |
-| `mensagem`   | balão sai de um personagem e vai até o outro             |
-| `espera`     | personagem pensativo ou aguardando aprovação do usuário  |
-| `fim`        | volta ao estado livre (café, conversa no corredor)       |
+As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2-PLANO.md)). Campos desconhecidos são ignorados, e a versão fica em `v`.
+
+| kind      | no escritório                                            |
+|-----------|----------------------------------------------------------|
+| `start`   | o funcionário chega e senta na mesa                      |
+| `tool`    | animação e balão ("lendo api.ts", "rodando testes")      |
+| `message` | balão sai de um personagem e vai até o outro             |
+| `wait`    | personagem pensativo ou aguardando aprovação do usuário  |
+| `end`     | volta ao estado livre (café, conversa no corredor)       |
+| `error`   | balão vermelho curto                                     |
+| `task`    | post-it no quadro de tarefas                             |
 
 **Vantagens:**
 - **Mudanças no Claude Code:** só o tradutor precisa mudar.
@@ -184,7 +188,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 | Desktop           | Tauri + modo navegador  | aceito (16/11/2026) |
 | Core              | Rust                    | aceito (16/11/2026) |
 | Terminal          | xterm.js + portable-pty | aceito (16/11/2026) |
-| Escritório        | PixiJS 2D               | proposto |
+| Escritório        | PixiJS 2D               | aceito (22/11/2026): PixiJS 8 carregado só quando o painel abre (E8) |
 | Conta do Claude   | CLI oficial do usuário  | proposto |
 | Licença           | MIT                     | aceito (16/11/2026): simples, permissiva, compatível com o ECC |
 | Nome              | termbay                 | aceito (16/11/2026): substitui "officeAgents", que confundia com o Microsoft Office e com o projeto `office-agents`. Ver [PROJETOS-PARECIDOS.md](PROJETOS-PARECIDOS.md) |
@@ -216,3 +220,12 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 | Controle de fluxo | 512 KiB para pausar, 128 KiB para retomar, por pty, contados antes do agrupador | aceito (16/11/2026): detalha a D6; Ctrl+C abaixo de 1 s com vários painéis e memória limitada (D25) |
 | Divisão de tela | árvore binária meio a meio; escritório fora da árvore | aceito (16/11/2026): o mais simples que cobre o marco 2 (D26) |
 | Ctrl+C no Windows | antes de abrir cada shell, o core limpa o "ignorar Ctrl+C" herdável do próprio processo (`SetConsoleCtrlHandler(NULL, FALSE)`) | aceito (22/11/2026): quem abre o termbay (lançador, runner de CI) pode deixar esse atributo ligado, e o shell e seus programas herdariam, sem nunca receber o `CTRL_C_EVENT` do ConPTY. Coberto pelo e2e do Windows, que passou a bloquear a CI |
+| Hook → app | variáveis `TERMBAY_EVENTS`, `TERMBAY_TOKEN` e `TERMBAY_PANE` no ambiente de cada shell; sem elas, `termbay hook` sai na hora | aceito (22/11/2026): sem arquivo de descoberta; o `claude` fora do termbay não é afetado (E1) |
+| Redução do payload | no processo do hook, com lista fechada de campos | aceito (22/11/2026): conteúdo, comandos e caminhos nunca cruzam o socket (E2) |
+| Contrato do hook | sempre código 0, nada no stdout, prazo de 200 ms, entrada até 8 MiB | aceito (22/11/2026): o escritório nunca bloqueia nem atrasa o `claude` (E3) |
+| Formato próprio | chaves em inglês, `kind` em `start`/`tool`/`message`/`wait`/`end`/`error`/`task`, versão em `v` | aceito (22/11/2026): segue a regra de código em inglês (E4) |
+| Estado do escritório | em Rust (`core::state`); a UI recebe foto inicial e mudanças por `Channel` | aceito (22/11/2026): testável sem DOM e igual para o futuro `serve` (E5) |
+| Servidor de eventos | `TcpListener` em `127.0.0.1:0`, HTTP mínimo à mão, token de 32 bytes em tempo constante, corpo até 64 KiB | aceito (22/11/2026): um endpoint local, sem `tokio` nem framework (E6) |
+| Instalação dos hooks | `termbay hooks install` no `~/.claude/settings.json` (ou `--project`), com prévia, confirmação e cópia de segurança | aceito (22/11/2026): instala uma vez para todos os projetos (E7) |
+| Quando o escritório aparece | abre sozinho no primeiro evento de agente da janela; um escritório por janela | aceito (22/11/2026): `[office] auto_open` na config (E9) |
+| Conteúdo dos balões | nome do arquivo, `description`, `summary`, padrão de busca, assunto da tarefa; 80 caracteres; nunca prompt, conteúdo ou comando inteiro | aceito (22/11/2026): o escritório pode aparecer num print (E10) |
