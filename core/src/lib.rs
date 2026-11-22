@@ -9,6 +9,7 @@
 //! - [`shell_integration`]: scripts, nonce and marks of integrated shells.
 //! - [`complete`]: the autocomplete engine and history readers.
 //! - [`events`]: office events: hook payload reducer and local event server.
+//! - [`state`]: the office: who is there and what each one does (phase 2).
 
 pub mod cli;
 pub mod complete;
@@ -16,6 +17,7 @@ pub mod config;
 pub mod events;
 pub mod pty;
 pub mod shell_integration;
+pub mod state;
 
 /// Version of termbay, taken from the workspace `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
