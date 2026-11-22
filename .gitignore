@@ -13,6 +13,8 @@ pnpm-debug.log*
 # Tauri
 app/src-tauri/target/
 app/src-tauri/gen/
+# termbay-hook copied for `tauri build` by scripts/prepare-hook-sidecar.sh
+app/src-tauri/binaries/
 
 # Segredos e configuração local
 .env

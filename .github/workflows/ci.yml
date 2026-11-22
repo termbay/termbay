@@ -458,10 +458,40 @@ jobs:
         working-directory: ui
         run: npm run check:release
 
+      # The hook's own binary (decision E11), shipped next to `termbay` in
+      # every package as a Tauri sidecar.
+      - name: Build termbay-hook as a sidecar
+        run: bash scripts/prepare-hook-sidecar.sh
+
       # Unsigned packages, only to measure and test (signing comes later).
       # Run from the repository root: the Tauri CLI finds app/src-tauri/tauri.conf.json.
       - name: tauri build
-        run: ui/node_modules/.bin/tauri build --ci --bundles "${{ matrix.bundles }}"
+        run: |
+          ui/node_modules/.bin/tauri build --ci --bundles "${{ matrix.bundles }}" \
+            --config app/src-tauri/tauri.hook.conf.json
+
+      # `termbay hooks install` looks for termbay-hook next to its own
+      # executable; check every package puts it there.
+      - name: termbay-hook is in the packages
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          case "${{ runner.os }}" in
+            macOS)
+              test -x target/release/bundle/macos/termbay.app/Contents/MacOS/termbay-hook
+              ;;
+            Linux)
+              for deb in target/release/bundle/deb/*.deb; do dpkg-deb -c "$deb" | grep -E ' \./usr/bin/termbay-hook$'; done
+              if command -v rpm >/dev/null; then
+                for r in target/release/bundle/rpm/*.rpm; do rpm -qlp "$r" | grep -x /usr/bin/termbay-hook; done
+              else
+                echo "rpm not installed; the .rpm is built from the same file list as the .deb"
+              fi
+              ;;
+            Windows)
+              for setup in target/release/bundle/nsis/*-setup.exe; do 7z l "$setup" | grep -i 'termbay-hook.exe'; done
+              ;;
+          esac
 
       - name: Check artifact sizes
         run: |
@@ -486,11 +516,8 @@ jobs:
       - name: Measure startup time
         run: node scripts/measure-startup.mjs "${{ matrix.binary }}" --runs 50 --title "Startup on ${{ runner.os }}"
 
-      # The hook's own binary (decision E11): small, without Tauri, and
-      # quick to start, since PreToolUse holds every tool call until it exits.
-      - name: Build termbay-hook
-        run: cargo build --release --locked -p termbay-hook
-
+      # Small and quick to start, since PreToolUse holds every tool call
+      # until the hook exits. Built by the sidecar step above.
       - name: termbay-hook size and startup time
         run: |
           bash scripts/check-size.sh --title "termbay-hook on ${{ runner.os }}" "${{ matrix.hook }}"
