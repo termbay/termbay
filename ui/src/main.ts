@@ -72,7 +72,7 @@ async function main(): Promise<void> {
 }
 
 /**
- * Debug list of office events (task B1), only in builds with
+ * Debug list of the office (tasks B1 and D3), only in builds with
  * VITE_OFFICE_DEBUG=1. Loaded with import() behind that check, so release
  * builds do not contain it (e2e/check-release.mjs makes sure).
  */
@@ -84,7 +84,7 @@ async function startOfficeDebug(): Promise<{ toggle(): void } | null> {
     import("./transport/office"),
   ]);
   const list = new OfficeDebugList(panel);
-  subscribeOffice(tauriOfficeIpc, (event) => list.add(event)).catch((error: unknown) =>
+  subscribeOffice(tauriOfficeIpc, list).catch((error: unknown) =>
     console.error("[termbay] could not subscribe to office events", error),
   );
   return list;
