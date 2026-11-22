@@ -62,7 +62,7 @@ termbay/
           ┌──────────┴───────────────────────┴────────┐
           │                 core (Rust)                │
           │   pty  ◄─── shell do usuário ───► claude   │
-          │   eventos ◄── `termbay hook` ◄── hooks│
+          │   eventos ◄── `termbay-hook` ◄── hooks│
           └────────────────────────────────────────────┘
 ```
 
@@ -73,7 +73,7 @@ termbay/
 - **estado:** mantém quem está no escritório, o que cada um está fazendo e o histórico recente de balões.
 - **cli:**
   - `termbay`: abre o app.
-  - `termbay hook`: chamado pelos hooks do Claude Code. Lê o JSON da entrada padrão e envia ao servidor local. Por ser o próprio binário, o usuário não precisa de Node nem Python.
+  - `termbay-hook`: binário separado e pequeno, sem Tauri, chamado pelos hooks do Claude Code. Lê o JSON da entrada padrão, reduz e envia ao servidor local. É Rust, então o usuário não precisa de Node nem Python. Separado porque o binário do app abre devagar demais no Linux para rodar a cada evento (E11).
   - `termbay init`: roda o recrutador no projeto atual.
   - `termbay serve`: modo navegador. Abre a mesma interface em `localhost`, pra máquinas sem interface gráfica, SSH ou máquinas fracas.
   - `termbay doctor`: verifica `claude`, login, hooks e shell.
@@ -118,7 +118,7 @@ As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2
 
 ## Integração com o Claude Code (hooks)
 
-- **Instalação:** o `termbay init` (ou `doctor --fix`) adiciona ao `.claude/settings.json` do projeto hooks que chamam `termbay hook <evento>`.
+- **Instalação:** o `termbay init` (ou `doctor --fix`) adiciona ao `.claude/settings.json` do projeto hooks que chamam `termbay-hook <evento>`.
 - **Eventos de interesse:** início e fim de subagente, uso de ferramenta (antes e depois), pedido de permissão, erros de ferramenta, tarefas e fim da sessão. Lista final e motivos em [FASE0-HOOKS.md](FASE0-HOOKS.md). Não registrar `MessageDisplay` (bloqueia a exibição do texto) nem `WorktreeCreate` (substitui o comportamento padrão).
 - **Conversa entre agentes:** toda mensagem passa pela ferramenta `SendMessage`, e o hook `PreToolUse` traz remetente, destinatário e texto completo. Funciona também entre subagentes nomeados, sem times (validado na fase 0, Claude Code 2.1.311). Em times de agentes (só em sessão interativa) é ainda melhor: o nome do teammate vem em todos os eventos, a criação devolve uma cor para cada um e o `SendMessage` já traz remetente, destinatário, cores e resumo.
 - **Fallback:** as transcrições da sessão em `~/.claude/projects/` (somente leitura) trazem o que os hooks não trazem: falas intermediárias dos subagentes e a mensagem recebida. Formato não documentado, então fica fora do MVP, como enriquecimento opcional.
@@ -220,7 +220,7 @@ As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2
 | Controle de fluxo | 512 KiB para pausar, 128 KiB para retomar, por pty, contados antes do agrupador | aceito (16/11/2026): detalha a D6; Ctrl+C abaixo de 1 s com vários painéis e memória limitada (D25) |
 | Divisão de tela | árvore binária meio a meio; escritório fora da árvore | aceito (16/11/2026): o mais simples que cobre o marco 2 (D26) |
 | Ctrl+C no Windows | antes de abrir cada shell, o core limpa o "ignorar Ctrl+C" herdável do próprio processo (`SetConsoleCtrlHandler(NULL, FALSE)`) | aceito (22/11/2026): quem abre o termbay (lançador, runner de CI) pode deixar esse atributo ligado, e o shell e seus programas herdariam, sem nunca receber o `CTRL_C_EVENT` do ConPTY. Coberto pelo e2e do Windows, que passou a bloquear a CI |
-| Hook → app | variáveis `TERMBAY_EVENTS`, `TERMBAY_TOKEN` e `TERMBAY_PANE` no ambiente de cada shell; sem elas, `termbay hook` sai na hora | aceito (22/11/2026): sem arquivo de descoberta; o `claude` fora do termbay não é afetado (E1) |
+| Hook → app | variáveis `TERMBAY_EVENTS`, `TERMBAY_TOKEN` e `TERMBAY_PANE` no ambiente de cada shell; sem elas, `termbay-hook` sai na hora | aceito (22/11/2026): sem arquivo de descoberta; o `claude` fora do termbay não é afetado (E1) |
 | Redução do payload | no processo do hook, com lista fechada de campos | aceito (22/11/2026): conteúdo, comandos e caminhos nunca cruzam o socket (E2) |
 | Contrato do hook | sempre código 0, nada no stdout, prazo de 200 ms, entrada até 8 MiB | aceito (22/11/2026): o escritório nunca bloqueia nem atrasa o `claude` (E3) |
 | Formato próprio | chaves em inglês, `kind` em `start`/`tool`/`message`/`wait`/`end`/`error`/`task`, versão em `v` | aceito (22/11/2026): segue a regra de código em inglês (E4) |
@@ -229,3 +229,4 @@ As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2
 | Instalação dos hooks | `termbay hooks install` no `~/.claude/settings.json` (ou `--project`), com prévia, confirmação e cópia de segurança | aceito (22/11/2026): instala uma vez para todos os projetos (E7) |
 | Quando o escritório aparece | abre sozinho no primeiro evento de agente da janela; um escritório por janela | aceito (22/11/2026): `[office] auto_open` na config (E9) |
 | Conteúdo dos balões | nome do arquivo, `description`, `summary`, padrão de busca, assunto da tarefa; 80 caracteres; nunca prompt, conteúdo ou comando inteiro | aceito (22/11/2026): o escritório pode aparecer num print (E10) |
+| Binário do hook | `termbay-hook`, separado e sem Tauri, no mesmo pacote | aceito (22/11/2026): o binário do app abre em 31,9 ms (p95) no Linux, com 131 bibliotecas carregadas; o `PreToolUse` segura cada ferramenta até o hook terminar (E11) |

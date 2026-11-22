@@ -1,13 +1,13 @@
 # Fase 2: plano do escritório
 
-> Status: decisões E1–E10 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). Próximo passo: F1.
+> Status: decisões E1–E11 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). F1 feita (seção 6). Próximo passo: A1 e D1.
 > Objetivo: quando o `claude` roda dentro do termbay, um painel mostra o escritório em 2D, com o agente principal ("chefe") e cada subagente como funcionário. Eles chegam, trabalham com balões do que estão fazendo, esperam aprovação, trocam mensagens e vão embora. O terminal continua igual para quem não usa agentes.
 > Base: o que os hooks expõem está em [FASE0-HOOKS.md](FASE0-HOOKS.md). O terminal (fase 1, marcos 1 e 2) já reserva o painel `aside#office-panel` e o atalho Cmd/Ctrl+Shift+O.
 
 ## 1. Escopo
 
 **Entra:**
-- `termbay hook <evento>`: chamado pelos hooks do Claude Code, reduz o payload e o envia ao app.
+- `termbay-hook <evento>`: binário pequeno, sem Tauri (E11), chamado pelos hooks do Claude Code; reduz o payload e o envia ao app.
 - Servidor de eventos local (`core::events`), só em `127.0.0.1`, com token por sessão do app.
 - Tradutor com estado (`core::state`): eventos crus reduzidos → formato próprio (seção 2, E4), com o mapa `agent_id → nome`.
 - `termbay hooks install` / `uninstall`: registra os hooks no `settings.json` do Claude Code, com prévia e confirmação.
@@ -31,16 +31,17 @@
 
 | # | Decisão | Recomendação | Motivo |
 |---|---|---|---|
-| E1 | Como o hook acha o app | O app põe no ambiente de cada shell que abre: `TERMBAY_EVENTS` (endereço `127.0.0.1:<porta>`), `TERMBAY_TOKEN` e `TERMBAY_PANE` (id do painel). O `claude` e os hooks herdam. **Sem essas variáveis, `termbay hook` sai na hora com código 0**, sem fazer nada | Nenhum arquivo de descoberta para vazar ou ficar velho. O `claude` fora do termbay não é afetado. O `TERMBAY_PANE` liga cada sessão ao seu painel (clicar no personagem foca o terminal dele) |
-| E2 | Onde reduzir o payload | **No processo do hook, antes de enviar.** O `termbay hook` mantém só os campos da lista da seção 3.2, troca caminhos pelo nome do arquivo, corta textos e descarta conteúdo (`Write.content`, `tool_response` de leitura, `prompt`, `transcript_path`). O tradutor com estado roda no app | O conteúdo de arquivos, comandos e caminhos com o nome do usuário nunca cruza o socket nem entra na memória do app (lacuna 8 da fase 0) |
+| E1 | Como o hook acha o app | O app põe no ambiente de cada shell que abre: `TERMBAY_EVENTS` (endereço `127.0.0.1:<porta>`), `TERMBAY_TOKEN` e `TERMBAY_PANE` (id do painel). O `claude` e os hooks herdam. **Sem essas variáveis, `termbay-hook` sai na hora com código 0**, sem fazer nada | Nenhum arquivo de descoberta para vazar ou ficar velho. O `claude` fora do termbay não é afetado. O `TERMBAY_PANE` liga cada sessão ao seu painel (clicar no personagem foca o terminal dele) |
+| E2 | Onde reduzir o payload | **No processo do hook, antes de enviar.** O `termbay-hook` mantém só os campos da lista da seção 3.2, troca caminhos pelo nome do arquivo, corta textos e descarta conteúdo (`Write.content`, `tool_response` de leitura, `prompt`, `transcript_path`). O tradutor com estado roda no app | O conteúdo de arquivos, comandos e caminhos com o nome do usuário nunca cruza o socket nem entra na memória do app (lacuna 8 da fase 0) |
 | E3 | Contrato do hook com o Claude Code | **Sempre código 0 e nada no stdout**, mesmo com erro. Conexão e envio com prazo total de 200 ms; se passar, o evento é descartado. Entrada lida até 8 MiB, o resto ignorado | No Claude Code, código 2 bloqueia a ferramenta e o stdout de alguns hooks vira decisão. O escritório nunca pode atrapalhar nem atrasar o `claude` |
 | E4 | Formato próprio | Chaves em **inglês** (convenção do código): `{ "v": 1, "session", "pane", "agent", "kind", ... }` com `kind` em `start`, `tool`, `message`, `wait`, `end`, `error`, `task`. Versionado em `v`; campos desconhecidos são ignorados | A arquitetura mostra o formato com chaves em português (`sessao`, `agente`, `tipo`), o que contraria a regra de código em inglês. O formato é a porta de entrada para tradutores de outras ferramentas |
 | E5 | Onde fica o estado | Em Rust (`core::state`): quem está no escritório, o que cada um faz, os últimos balões. A UI recebe uma **foto inicial e depois as mudanças** por um `Channel` do Tauri (`office_subscribe`) | Testável sem DOM, igual para o app e para o futuro `serve`, e as heurísticas da fase 0 (ligação `Agent → agent_id`, retomadas) ficam num lugar só |
 | E6 | Servidor | `std::net::TcpListener` em `127.0.0.1:0`, uma thread, HTTP/1.1 mínimo escrito à mão (só `POST /v1/events`), token de 32 bytes do sistema (`getrandom`, já no lockfile) comparado em tempo constante, corpo até 64 KiB, conexões curtas, `Host` conferido. Sem `tokio`, sem framework | É um endpoint só, local, com payloads pequenos. Menos dependências e menos superfície. O `serve` pode trocar por algo maior quando precisar de WebSocket |
-| E7 | Onde instalar os hooks | `termbay hooks install` grava no **`~/.claude/settings.json` do usuário** por padrão (`--project` para `.claude/settings.json`), mostrando a mudança e pedindo confirmação (`--yes` para pular). Mescla sem apagar hooks do usuário, é idempotente e guarda o caminho absoluto do binário | Com E1, o hook não faz nada fora do termbay, então instalar uma vez serve para todos os projetos. Gravar no projeto sujaria o git de cada repositório |
+| E7 | Onde instalar os hooks | `termbay hooks install` grava no **`~/.claude/settings.json` do usuário** por padrão (`--project` para `.claude/settings.json`), mostrando a mudança e pedindo confirmação (`--yes` para pular). Mescla sem apagar hooks do usuário, é idempotente e guarda o caminho absoluto do `termbay-hook` | Com E1, o hook não faz nada fora do termbay, então instalar uma vez serve para todos os projetos. Gravar no projeto sujaria o git de cada repositório |
 | E8 | Biblioteca do escritório | **PixiJS 8** (MIT), carregado com `import()` só quando o painel abre pela primeira vez, ticker parado com o painel escondido ou a janela minimizada | Mantém a decisão "PixiJS 2D" da arquitetura. O carregamento tardio faz quem só usa o terminal não pagar nada na abertura. Alternativa mais leve: Canvas 2D puro, se o PixiJS pesar demais na medição (F1) |
 | E9 | Quando o painel aparece | Abre sozinho no **primeiro evento de agente** da janela (`[office] auto_open = true`), fecha só pelo atalho ou pelo botão. Um escritório por janela, com todas as sessões; cada sessão tem seu chefe, identificado pelo nome da aba | Segue o princípio "aparece sozinho quando há agentes" sem esconder nada do terminal. Várias sessões do `claude` em abas diferentes aparecem no mesmo escritório |
 | E10 | O que um balão pode mostrar | Nome do arquivo (nunca o caminho), `description` do `Bash` (sem ela, só o nome do programa, nunca o comando inteiro), `summary` do `SendMessage`, padrão do `Grep`/`Glob`, assunto da tarefa. Tudo cortado em 80 caracteres e limpo de sequências de controle. **Nunca** o texto do prompt do usuário nem o conteúdo de arquivos | Comandos podem ter tokens (`curl -H "Authorization: ..."`). O escritório pode aparecer num print ou numa transmissão |
+| E11 | Binário do hook | **`termbay-hook`, um binário separado e pequeno**: crate próprio no workspace, sem Tauri, que depende só do redutor e do cliente do `core`. Vai no mesmo pacote, ao lado do `termbay`. `termbay hooks install` continua no binário do app | Medido na F1: o binário do app abre em 31,9 ms (p95) no Linux, acima do limite de 30 ms, porque carrega 131 bibliotecas, WebKitGTK entre elas, antes do `main`. O `PreToolUse` segura cada ferramenta do `claude` até o hook terminar |
 
 ## 3. Contratos
 
@@ -48,7 +49,7 @@
 
 ```
 claude (dentro de um painel do termbay)
-  └─ hook do Claude Code ──► termbay hook PreToolUse      (processo curto)
+  └─ hook do Claude Code ──► termbay-hook PreToolUse      (processo curto, sem Tauri)
                                │ lê stdin, reduz (E2), corta (E10)
                                ▼  POST /v1/events, token, 200 ms (E3)
 app: core::events ──► core::state (tradutor, E5) ──► Channel ──► ui/office (PixiJS)
@@ -82,11 +83,11 @@ Siglas: **A** = ana-core, **B** = bruno-terminal, **C** = carla-escritorio, **D*
 
 | # | Resp. | Tarefa | Depende de | Pronto quando | Teste que comprova |
 |---|---|---|---|---|---|
-| F1 | F | **Medição antes de tudo:** tempo de abertura de `termbay hook` sem as variáveis de E1 e com elas, nos três sistemas (o binário é o do app e, no Linux, carrega o WebKitGTK ao abrir), e peso do PixiJS no bundle | — | números na CI e decisão: binário único ou um `termbay-hook` separado e pequeno | job que roda 50 vezes e publica p50/p95; limite inicial de 30 ms (p95) no macOS e no Linux e 60 ms no Windows |
+| F1 | F | **Medição antes de tudo:** tempo de abertura do binário do app nos três sistemas (no Linux ele carrega o WebKitGTK ao abrir) e peso do PixiJS no bundle. **Feita em 22/11/2026**, resultado na seção 6 | — | números na CI e decisão: binário único ou um `termbay-hook` separado (decidido: E11) | `scripts/measure-startup.mjs` no job de bundle: 50 execuções, primeira abertura, p50, p95 e máximo |
 | A1 | A | `core::events`: servidor de E6 numa thread, iniciado com o app | E6 | aceita evento com token certo e recusa o resto | unitários: token errado, sem token, corpo grande demais, `Host` diferente, método ou caminho errado, conexão lenta (prazo) e porta só em `127.0.0.1` |
 | A2 | A | Variáveis de E1 no ambiente de cada pty | E1 | o shell enxerga as três variáveis | teste do `core::pty` com `/bin/sh` e `cmd` imprimindo as variáveis |
 | D1 | D | Redutor do hook (seção 3.2 e E10), puro, em `core` | E2, E10 | só os campos da lista saem | tabela com os payloads da fase 0; teste de "canário": um segredo posto em `content`, `command`, `prompt`, `transcript_path` e no erro nunca aparece na saída |
-| A3 | A | Subcomando `termbay hook <evento>` (E3) | A1, D1 | o evento chega ao servidor; sem variáveis, sai na hora | integração: com servidor de teste recebe o evento; sem servidor, sem variáveis, com stdin gigante ou JSON inválido sai com 0, sem stdout e dentro do prazo |
+| A3 | A | Binário `termbay-hook <evento>` (E3, E11): crate `hook/` no workspace, sem Tauri, empacotado ao lado do `termbay` nos três sistemas | A1, D1 | o evento chega ao servidor; sem variáveis, sai na hora | integração: com servidor de teste recebe o evento; sem servidor, sem variáveis, com stdin gigante ou JSON inválido sai com 0, sem stdout e dentro do prazo. Medição da F1 com limite: p95 abaixo de 10 ms nos três sistemas; o pacote continua abaixo de 20 MB |
 | D2 | D | `termbay hooks install` / `uninstall` / `status` (E7) | A3 | instala, desinstala e mostra o estado sem perder nada do usuário | fixtures de `settings.json`: vazio, com hooks do usuário, com hooks antigos do termbay, inválido (não grava e explica); rodar duas vezes não duplica |
 | B1 | B | Ponte: `office_subscribe` e uma lista de eventos para depuração (atrás de um sinalizador de build) | A1 | os eventos aparecem na tela | e2e: um painel roda `termbay hook PreToolUse < fixture.json` e o evento aparece |
 
@@ -124,7 +125,7 @@ Aceite de E1–E10
                   ▲ marco E1           ▲ marco E2          ▲ marco E3
 ```
 
-- **F1 vem primeiro** porque pode mudar a forma do `termbay hook` (ver riscos).
+- **F1 veio primeiro** porque podia mudar a forma do hook, e mudou (E11).
 - **A e D começam juntos:** o redutor (D1) é puro e não precisa do servidor. A Carla começa pelo mapeamento (C1) e pela cena com eventos falsos, sem esperar o core.
 - **Marco E1:** o evento sai do `claude` e aparece numa lista na tela, nos três sistemas, com o hook instalado por comando.
 - **Marco E2:** uma sessão real com subagentes anima do começo ao fim com personagens provisórios, e o painel abre e fecha sozinho.
@@ -134,7 +135,7 @@ Aceite de E1–E10
 
 | Risco | Mitigação |
 |---|---|
-| **Abertura lenta do `termbay hook`:** o binário é o do app; no Linux ele liga o WebKitGTK e o GTK ao abrir, e cada evento abre um processo (20 a 30 por sessão trivial). No macOS, medido em 22/11/2026: cerca de 5 ms com cache quente e 410 ms na primeira abertura | F1 mede antes de tudo. Se passar do limite, um binário `termbay-hook` pequeno, sem Tauri, no mesmo pacote (decisão nova, com impacto no tamanho) |
+| **Abertura lenta do hook:** cada evento abre um processo (20 a 30 por sessão trivial), e o binário do app carrega o WebKitGTK no Linux | **Resolvido pela F1 e pela E11** (tabela abaixo): o hook é um binário próprio, sem Tauri, com limite de p95 na CI |
 | **Hooks no Windows:** o Claude Code roda o comando do hook por um shell que pode variar (Git Bash ou outro) e o caminho tem espaços | caminho absoluto entre aspas no `settings.json`; e2e no Windows com o comando gravado pelo `hooks install` |
 | **Mudanças no Claude Code:** campos e eventos mudam sem aviso | redutor e tradutor tolerantes (campo desconhecido é ignorado, campo faltando não derruba), testes com as sequências gravadas, versão do Claude Code anotada em cada gravação |
 | **Mexer no `settings.json` do usuário** | prévia, confirmação, cópia `settings.json.bak` antes de gravar, mesclagem que preserva o resto, `uninstall` que remove só o que é nosso |
@@ -143,9 +144,23 @@ Aceite de E1–E10
 | **Ligação `Agent → agent_id` em paralelo** (lacuna 3 da fase 0) | personagem chega "genérico" e ganha o nome quando o `PostToolUse` confirma; teste com a sessão B |
 | **Termos da Anthropic** (ponto em aberto da arquitetura) | a fase 2 só lê eventos do `claude` oficial do usuário e não muda o login; confirmar os termos antes do lançamento continua pendente |
 
+### Resultado da F1 (22/11/2026)
+
+Binário do app (`termbay --version`, release), 50 execuções depois de 3 de aquecimento, nos runners da CI:
+
+| Sistema | Primeira abertura | p50 | p95 | Limite do plano (p95) |
+|---|---|---|---|---|
+| macOS | 23,8 ms | 7,3 ms | 11,5 ms | 30 ms |
+| Windows | 38,5 ms | 10,5 ms | 17,3 ms | 60 ms |
+| Linux | 58,8 ms | 31,0 ms | **31,9 ms** | 30 ms (acima) |
+
+No Linux, o binário liga 131 bibliotecas, WebKitGTK entre elas. Daí a E11.
+
+PixiJS 8.23.0 numa cena mínima carregada com `import()`: o pacote inicial fica com 2 KB; o escritório soma 575 KB de JS (170 KB comprimidos), em arquivos carregados só quando o painel abre. As 12 dependências são MIT, ISC ou BSD-3-Clause.
+
 ## 7. Decisões aceitas
 
-As dez da seção 2, aceitas pelo Guilherme em 22/11/2026. As que mais mudam o produto:
+As onze da seção 2, aceitas pelo Guilherme em 22/11/2026 (E11 depois da F1). As que mais mudam o produto:
 
 - **E1 + E7:** hooks instalados uma vez no `~/.claude/settings.json` do usuário, que não fazem nada fora do termbay.
 - **E4:** chaves do formato próprio em inglês, corrigindo o exemplo em português da arquitetura.
