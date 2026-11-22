@@ -13,7 +13,8 @@
 //! - `pty_ack({ id, bytes })`: bytes processed by xterm.js; drives the flow
 //!   control (D25). Unknown ids are ignored.
 //! - `pty_info({ id })` -> `{ shell, cwd, busy, foreground }`.
-//! - `get_config()` -> `{ autocomplete: { enabled, trigger, history } }`;
+//! - `get_config()` -> `{ autocomplete: { enabled, trigger, history },
+//!   office: { auto_open } }`;
 //!   an invalid file gives the defaults, never an error.
 //!
 //! When a pty ends (exit or close), `pty-exit` is emitted to the `main`
@@ -689,7 +690,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         let defaults = json!({
-            "autocomplete": { "enabled": false, "trigger": "tab", "history": true }
+            "autocomplete": { "enabled": false, "trigger": "tab", "history": true },
+            "office": { "auto_open": true }
         });
         let answer = |path: &std::path::Path| {
             serde_json::to_value(load_config(config::load_from(path))).unwrap()
@@ -698,13 +700,14 @@ mod tests {
         assert_eq!(answer(&path), defaults);
         std::fs::write(
             &path,
-            "[autocomplete]\nenabled = true\ntrigger = \"ctrl+space\"\nhistory = false\n",
+            "[autocomplete]\nenabled = true\ntrigger = \"ctrl+space\"\nhistory = false\n[office]\nauto_open = false\n",
         )
         .unwrap();
         assert_eq!(
             answer(&path),
             json!({
-                "autocomplete": { "enabled": true, "trigger": "ctrl+space", "history": false }
+                "autocomplete": { "enabled": true, "trigger": "ctrl+space", "history": false },
+                "office": { "auto_open": false }
             })
         );
         std::fs::write(&path, "[autocomplete\nenabled = = 1").unwrap();
@@ -715,6 +718,7 @@ mod tests {
         let h = harness();
         let config = h.invoke("get_config", json!({})).unwrap();
         assert!(config["autocomplete"]["trigger"].is_string(), "{config}");
+        assert!(config["office"]["auto_open"].is_boolean(), "{config}");
     }
 
     #[test]
