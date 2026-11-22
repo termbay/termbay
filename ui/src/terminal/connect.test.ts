@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Emitter } from "../transport/emitter";
 import { EchoPtyTransport } from "../transport/echo";
 import type { Disposable } from "../transport/types";
-import { binaryStringToBytes, connectPty, type TerminalLike } from "./connect";
+import { binaryStringToBytes, bufferEarlyInput, connectPty, type TerminalLike } from "./connect";
 
 /** Records what would be drawn; completes writes asynchronously like xterm.js. */
 class FakeTerminal implements TerminalLike {
@@ -128,5 +128,47 @@ describe("connectPty with the echo transport", () => {
 describe("binaryStringToBytes", () => {
   it("keeps the low byte of each code unit", () => {
     expect(Array.from(binaryStringToBytes("\x00\x7f\x80\xff"))).toEqual([0, 0x7f, 0x80, 0xff]);
+  });
+});
+
+describe("bufferEarlyInput", () => {
+  it("keeps what is typed before the session exists and sends it first", async () => {
+    const term = new FakeTerminal();
+    const early = bufferEarlyInput(term);
+    term.type("echo ");
+    term.sendBinary("\x1b[M");
+    term.type("hi\r");
+
+    const session = await new EchoPtyTransport().open({ cols: 80, rows: 24 });
+    const write = vi.spyOn(session, "write");
+    connectPty(term, session, { earlyInput: early.take() });
+    term.type("after");
+    await tick();
+
+    expect(write.mock.calls.map(([bytes]) => new TextDecoder().decode(bytes))).toEqual(["echo ", "\x1b[M", "hi\r", "after"]);
+  });
+
+  it("stops collecting once taken, so input is never sent twice", async () => {
+    const term = new FakeTerminal();
+    const early = bufferEarlyInput(term);
+    term.type("a");
+    expect(early.take()).toHaveLength(1);
+    term.type("b");
+    expect(early.take()).toEqual([]);
+  });
+
+  it("drops input beyond the limit and everything on dispose", () => {
+    const term = new FakeTerminal();
+    const early = bufferEarlyInput(term, 4);
+    term.type("abc");
+    term.type("de"); // would pass the limit
+    term.type("f");
+    expect(early.take().map((b) => new TextDecoder().decode(b))).toEqual(["abc", "f"]);
+
+    const other = bufferEarlyInput(term);
+    term.type("x");
+    other.dispose();
+    term.type("y");
+    expect(other.take()).toEqual([]);
   });
 });

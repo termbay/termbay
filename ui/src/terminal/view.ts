@@ -12,7 +12,7 @@ import { cwdLabelFromOsc7, sanitizeTitle } from "../layout/title";
 import { detectOs, type Os } from "../platform/os";
 import type { Disposable, PtySession } from "../transport/types";
 import { createClipboardKeyHandler } from "./clipboard";
-import { connectPty } from "./connect";
+import { bufferEarlyInput, connectPty, type EarlyInput } from "./connect";
 import { RendererController, type RendererKind } from "./renderer";
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -38,6 +38,8 @@ export class TerminalView implements PaneView {
   private autocompleteKeys: KeyHandler | null = null;
   /** Set when the shell ended and the pane stays open (D20): only Enter acts. */
   private exitedEnter: (() => void) | null = null;
+  /** What is typed before `attach`, so the first keystrokes in a new pane are not lost. */
+  private readonly earlyInput: EarlyInput;
 
   constructor(
     private readonly container: HTMLElement,
@@ -62,6 +64,8 @@ export class TerminalView implements PaneView {
       }
       return (this.autocompleteKeys?.(ev) ?? true) && clipboardKeys(ev);
     });
+    this.earlyInput = bufferEarlyInput(this.term);
+    this.disposables.push(this.earlyInput);
     this.term.open(container);
     // WebGL needs the terminal attached to the DOM first.
     this.renderer = new RendererController<WebglAddon>(this.term, () => new WebglAddon(), onRendererChange);
@@ -129,6 +133,8 @@ export class TerminalView implements PaneView {
 
   setExited(onEnter: () => void): void {
     this.autocompleteKeys = null;
+    // The shell never started (or ended): nothing will read what was typed.
+    this.earlyInput.dispose();
     this.exitedEnter = onEnter;
   }
 
@@ -144,7 +150,7 @@ export class TerminalView implements PaneView {
       session,
       options.trigger ? { trigger: options.trigger } : {},
     );
-    const connection = connectPty(this.term, autocomplete.session);
+    const connection = connectPty(this.term, autocomplete.session, { earlyInput: this.earlyInput.take() });
     const both: Disposable = {
       dispose: () => {
         connection.dispose();
