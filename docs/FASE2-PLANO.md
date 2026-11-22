@@ -1,6 +1,6 @@
 # Fase 2: plano do escritório
 
-> Status: decisões E1–E11 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). F1, A1 e D1 feitas (servidor e redutor em `core::events`). Próximo passo: A2 e A3.
+> Status: decisões E1–E11 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). F1, A1, D1, A2 e A3 feitas (servidor, redutor e variáveis em `core::events`; binário em `hook/`). Próximo passo: D2, com o empacotamento do `termbay-hook`.
 > Objetivo: quando o `claude` roda dentro do termbay, um painel mostra o escritório em 2D, com o agente principal ("chefe") e cada subagente como funcionário. Eles chegam, trabalham com balões do que estão fazendo, esperam aprovação, trocam mensagens e vão embora. O terminal continua igual para quem não usa agentes.
 > Base: o que os hooks expõem está em [FASE0-HOOKS.md](FASE0-HOOKS.md). O terminal (fase 1, marcos 1 e 2) já reserva o painel `aside#office-panel` e o atalho Cmd/Ctrl+Shift+O.
 
@@ -87,8 +87,8 @@ Siglas: **A** = ana-core, **B** = bruno-terminal, **C** = carla-escritorio, **D*
 | A1 | A | `core::events`: servidor de E6 numa thread, iniciado com o app | E6 | aceita evento com token certo e recusa o resto | unitários: token errado, sem token, corpo grande demais, `Host` diferente, método ou caminho errado, conexão lenta (prazo) e porta só em `127.0.0.1` |
 | A2 | A | Variáveis de E1 no ambiente de cada pty | E1 | o shell enxerga as três variáveis | teste do `core::pty` com `/bin/sh` e `cmd` imprimindo as variáveis |
 | D1 | D | Redutor do hook (seção 3.2 e E10), puro, em `core` | E2, E10 | só os campos da lista saem | tabela com os payloads da fase 0; teste de "canário": um segredo posto em `content`, `command`, `prompt`, `transcript_path` e no erro nunca aparece na saída |
-| A3 | A | Binário `termbay-hook <evento>` (E3, E11): crate `hook/` no workspace, sem Tauri, empacotado ao lado do `termbay` nos três sistemas | A1, D1 | o evento chega ao servidor; sem variáveis, sai na hora | integração: com servidor de teste recebe o evento; sem servidor, sem variáveis, com stdin gigante ou JSON inválido sai com 0, sem stdout e dentro do prazo. Medição da F1 com limite: p95 abaixo de 10 ms nos três sistemas; o pacote continua abaixo de 20 MB |
-| D2 | D | `termbay hooks install` / `uninstall` / `status` (E7) | A3 | instala, desinstala e mostra o estado sem perder nada do usuário | fixtures de `settings.json`: vazio, com hooks do usuário, com hooks antigos do termbay, inválido (não grava e explica); rodar duas vezes não duplica |
+| A3 | A | Binário `termbay-hook <evento>` (E3, E11): crate `hook/` no workspace, sem Tauri. O app sobe o servidor ao abrir e passa as variáveis a cada shell | A1, D1 | o evento chega ao servidor; sem variáveis, sai na hora | integração: com servidor de teste recebe o evento; sem servidor, sem variáveis, com stdin gigante ou JSON inválido sai com 0, sem stdout e dentro do prazo. Medição da F1 com limite: p95 abaixo de 10 ms nos três sistemas |
+| D2 | D | `termbay hooks install` / `uninstall` / `status` (E7), e o `termbay-hook` empacotado ao lado do `termbay` nos três sistemas (`.app`, `.deb`/`.rpm`, NSIS), achado pelo `install` ao lado do próprio executável | A3 | instala, desinstala e mostra o estado sem perder nada do usuário; o pacote continua abaixo de 20 MB | fixtures de `settings.json`: vazio, com hooks do usuário, com hooks antigos do termbay, inválido (não grava e explica); rodar duas vezes não duplica |
 | B1 | B | Ponte: `office_subscribe` e uma lista de eventos para depuração (atrás de um sinalizador de build) | A1 | os eventos aparecem na tela | e2e: um painel roda `termbay hook PreToolUse < fixture.json` e o evento aparece |
 
 ### Marco E2: "o escritório ganha vida"
