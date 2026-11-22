@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use termbay_core::cli::{self, CliError, Command};
 use termbay_core::events::EventServer;
+use termbay_core::hooks;
 
 mod bridge;
 mod commands;
@@ -41,7 +42,35 @@ fn main() -> ExitCode {
         Command::Version => print_and_exit(&cli::version_text()),
         Command::Help => print_and_exit(&cli::help_text()),
         Command::Gui => run_app(),
+        Command::Hooks { action, scope, yes } => run_hooks(action, scope, yes),
     }
+}
+
+/// `termbay hooks ...` (task D2 in `docs/FASE2-PLANO.md`). The hook binary
+/// is looked for next to this executable, where every package puts it.
+fn run_hooks(action: hooks::Action, scope: hooks::Scope, yes: bool) -> ExitCode {
+    use std::io::IsTerminal;
+
+    console::attach_to_parent();
+    let hook = std::env::current_exe()
+        .map(|exe| exe.with_file_name(hooks::HOOK_FILE_NAME))
+        .unwrap_or_else(|_| hooks::HOOK_FILE_NAME.into());
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let stdin = std::io::stdin();
+    let interactive = stdin.is_terminal();
+    let mut input = stdin.lock();
+    let mut output = std::io::stdout();
+    let env = |key: &str| std::env::var_os(key);
+    let mut ctx = hooks::Context {
+        cwd,
+        env: &env,
+        hook,
+        input: &mut input,
+        output: &mut output,
+        interactive,
+    };
+    let code = hooks::run(action, scope, yes, &mut ctx);
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
 /// Variable that `msedgedriver` sets when it starts the app for the e2e

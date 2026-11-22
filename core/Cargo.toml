@@ -20,7 +20,9 @@ toml = { version = "1", default-features = false, features = ["std", "parse", "s
 # Office events (phase 2): hook payloads are JSON, and the event server's
 # session token comes from the system's randomness. Both are already in the
 # app through Tauri; MIT OR Apache-2.0.
-serde_json = "1"
+# `preserve_order` keeps the key order of the user's Claude Code settings when
+# `termbay hooks install` writes them back (indexmap is already in the tree).
+serde_json = { version = "1", features = ["preserve_order"] }
 getrandom = "0.3"
 
 # SIGKILL when a shell ignores SIGHUP, and process info for `pty_info`.
