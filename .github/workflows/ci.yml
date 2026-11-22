@@ -280,6 +280,8 @@ jobs:
         run: |
           (cd ui && npm run build:e2e)
           ui/node_modules/.bin/tauri build --ci --debug --no-bundle --features e2e
+          # Run from a pane by the office spec (task B1).
+          cargo build --locked -p termbay-hook
 
       - name: e2e (milestone 1, tabs, splits, flow control)
         run: |
@@ -293,6 +295,9 @@ jobs:
             export DISPLAY=:99
           fi
           export TERMBAY_E2E_APP="$app"
+          hook="$PWD/target/debug/termbay-hook"
+          [[ "$RUNNER_OS" == "Windows" ]] && hook="$(cygpath -w "$PWD/target/debug/termbay-hook.exe")"
+          export TERMBAY_E2E_HOOK="$hook"
           tauri-driver "${driver_args[@]}" &
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             # msedgedriver deletes its user data folders (where WebView2

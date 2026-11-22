@@ -63,7 +63,31 @@ async function main(): Promise<void> {
   });
   controller = app;
 
-  installShortcuts(window, os, (action) => app.run(action));
+  const officeDebug = inTauri && import.meta.env.VITE_OFFICE_DEBUG === "1" ? await startOfficeDebug() : null;
+  installShortcuts(window, os, (action) => {
+    // Until the office panel exists (task B2), the shortcut shows the debug list.
+    if (action.type === "toggleOffice" && officeDebug) officeDebug.toggle();
+    else app.run(action);
+  });
+}
+
+/**
+ * Debug list of office events (task B1), only in builds with
+ * VITE_OFFICE_DEBUG=1. Loaded with import() behind that check, so release
+ * builds do not contain it (e2e/check-release.mjs makes sure).
+ */
+async function startOfficeDebug(): Promise<{ toggle(): void } | null> {
+  const panel = document.getElementById("office-panel");
+  if (!panel) return null;
+  const [{ OfficeDebugList }, { subscribeOffice, tauriOfficeIpc }] = await Promise.all([
+    import("./office/debug"),
+    import("./transport/office"),
+  ]);
+  const list = new OfficeDebugList(panel);
+  subscribeOffice(tauriOfficeIpc, (event) => list.add(event)).catch((error: unknown) =>
+    console.error("[termbay] could not subscribe to office events", error),
+  );
+  return list;
 }
 
 main().catch((error: unknown) => console.error("[termbay] failed to start", error));

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-office-subscribe"
+description = "Enables the office_subscribe command without any pre-configured scope."
+commands.allow = ["office_subscribe"]
+
+[[permission]]
+identifier = "deny-office-subscribe"
+description = "Denies the office_subscribe command without any pre-configured scope."
+commands.deny = ["office_subscribe"]

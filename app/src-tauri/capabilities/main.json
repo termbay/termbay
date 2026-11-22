@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Permissions of the main window: only the pty commands (T7, plus `pty_complete` of the autocomplete, `pty_info` and `get_config` of milestone 2), listening to events (for `pty-exit` and `pty-shell`) and closing the window when its last tab closes (D19). No shell, fs or http plugins.",
+  "description": "Permissions of the main window: only the pty commands (T7, plus `pty_complete` of the autocomplete, `pty_info` and `get_config` of milestone 2, `office_subscribe` of phase 2), listening to events (for `pty-exit` and `pty-shell`) and closing the window when its last tab closes (D19). No shell, fs or http plugins.",
   "windows": ["main"],
   "permissions": [
     "allow-pty-open",
@@ -12,6 +12,7 @@
     "allow-pty-complete",
     "allow-pty-info",
     "allow-get-config",
+    "allow-office-subscribe",
     "core:window:allow-close",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
