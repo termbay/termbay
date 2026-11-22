@@ -1,8 +1,9 @@
 //! User configuration: `~/.termbay/config.toml`, or the file named by
 //! `TERMBAY_CONFIG` (decision D8).
 //!
-//! For now only the `[autocomplete]` section is read (decision D15: off by
-//! default). T14 extends this module with the rest of the configuration.
+//! For now only the `[autocomplete]` section (decision D15: off by default)
+//! and the `[office]` section (decision E9) are read. T14 extends this
+//! module with the rest of the configuration.
 //!
 //! A missing file is the default configuration. An unreadable or invalid
 //! file never stops termbay from opening: the defaults are used and a
@@ -27,6 +28,23 @@ const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
 pub struct Config {
     /// `[autocomplete]`.
     pub autocomplete: AutocompleteConfig,
+    /// `[office]`.
+    pub office: OfficeConfig,
+}
+
+/// `[office]`: the panel with the 2D office (decision E9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct OfficeConfig {
+    /// Opens the panel by itself on the first agent event of the window.
+    /// It only closes through the shortcut or its close button.
+    pub auto_open: bool,
+}
+
+impl Default for OfficeConfig {
+    fn default() -> Self {
+        Self { auto_open: true }
+    }
 }
 
 /// `[autocomplete]`: the Warp-style suggestion menu (`docs/AUTOCOMPLETE.md`).
@@ -146,6 +164,15 @@ pub fn parse(text: &str) -> (Config, Vec<String>) {
             )),
         }
     }
+    if let Some(section) = table.get("office") {
+        match section.clone().try_into::<OfficeConfig>() {
+            Ok(office) => config.office = office,
+            Err(err) => warnings.push(format!(
+                "invalid [office] section, using its defaults: {}",
+                err.message()
+            )),
+        }
+    }
     (config, warnings)
 }
 
@@ -196,6 +223,29 @@ mod tests {
                 history: false,
             }
         );
+    }
+
+    #[test]
+    fn the_office_opens_by_itself_unless_turned_off() {
+        assert!(Config::default().office.auto_open);
+        let (config, warnings) = parse("[office]\nauto_open = false\n");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(!config.office.auto_open);
+        assert_eq!(config.autocomplete, AutocompleteConfig::default());
+
+        let (config, warnings) = parse("[office]\nfuture = 1\n");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(config.office.auto_open);
+    }
+
+    #[test]
+    fn an_invalid_office_section_keeps_the_rest() {
+        let (config, warnings) =
+            parse("[autocomplete]\nenabled = true\n[office]\nauto_open = \"no\"\n");
+        assert!(config.autocomplete.enabled);
+        assert!(config.office.auto_open);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("[office]"), "{warnings:?}");
     }
 
     #[test]
