@@ -1,6 +1,7 @@
-// Phase 2, task B1 (docs/FASE2-PLANO.md): an event sent by termbay-hook from
-// inside a pane goes through the event server and shows in the office debug
-// list (the e2e build has VITE_OFFICE_DEBUG=1).
+// Phase 2, tasks B1 and D3 (docs/FASE2-PLANO.md): an event sent by
+// termbay-hook from inside a pane goes through the event server and the
+// office state and shows in the office debug list (the e2e build has
+// VITE_OFFICE_DEBUG=1).
 //
 // Environment: TERMBAY_E2E_HOOK, path to the termbay-hook binary.
 import assert from "node:assert/strict";
@@ -33,7 +34,8 @@ test("an event sent by termbay-hook in a pane shows in the office", async () => 
       `),
     20000,
   );
-  // Reduced by the hook: the file name, never the folder.
-  assert.match(line, /^PreToolUse · main · Read · E2E_OFFICE\.ts$/);
+  // Reduced by the hook (the file name, never the folder), then turned
+  // into an office event by core::state: the main agent is reading.
+  assert.match(line, /^tool · main · reading · E2E_OFFICE\.ts$/);
   assert.ok(await app.isVisible("#office-panel"), "the panel opens on the first event");
 });

@@ -1,72 +1,93 @@
-// Office events from the core (task B1 in docs/FASE2-PLANO.md): already
-// reduced by termbay-hook (section 3.2), never the raw hook payload.
+// The office from the core (tasks B1 and D3 in docs/FASE2-PLANO.md): a
+// picture of who is there (decision E5), then each change in the office's
+// own format (decision E4). Built by core::state from reduced hook events.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-/** One reduced hook event, as `core::events::ReducedEvent` serializes it. */
-export interface ReducedEvent {
+/** What happened, in the office's terms (`core::state::Kind`). */
+export type OfficeKind = "start" | "tool" | "message" | "wait" | "end" | "error" | "task";
+
+/** One change in the office (`core::state::OfficeEvent`). */
+export interface OfficeEvent {
   readonly v: number;
-  readonly event: string;
   readonly session: string;
   readonly pane?: string;
-  readonly agent_id?: string;
-  readonly agent_type?: string;
-  readonly tool_use_id?: string;
-  readonly task_id?: string;
-  readonly tool?: string;
-  readonly file?: string;
-  readonly description?: string;
-  readonly program?: string;
-  readonly pattern?: string;
-  readonly interrupt?: boolean;
+  /** "main" or the subagent's id. */
+  readonly agent: string;
+  readonly kind: OfficeKind;
   readonly name?: string;
-  readonly subagent_type?: string;
-  readonly background?: boolean;
-  readonly spawned_agent_id?: string;
-  readonly status?: string;
+  readonly role?: string;
   readonly color?: string;
-  readonly to?: string;
-  readonly summary?: string;
-  readonly message_type?: string;
-  readonly success?: boolean;
-  readonly resumed_agent_id?: string;
-  readonly sender?: string;
-  readonly sender_color?: string;
+  readonly action?: string;
   readonly target?: string;
-  readonly target_color?: string;
-  readonly teammate_name?: string;
-  readonly last_message?: string;
-  readonly background_tasks?: number;
-  readonly task_subject?: string;
-  readonly source?: string;
-  readonly reason?: string;
-  readonly notification_type?: string;
-  readonly task_notification?: boolean;
+  /** Agent id of the recipient when known, otherwise the name as written. */
+  readonly to?: string;
+  readonly text?: string;
+  readonly result?: string;
+  readonly task?: string;
+}
+
+export type Activity = "working" | "waiting" | "idle";
+
+export interface AgentView {
+  readonly id: string;
+  readonly name?: string;
+  readonly role?: string;
+  readonly color?: string;
+  readonly activity: Activity;
+  readonly bubble?: string;
+}
+
+export interface TaskView {
+  readonly id: string;
+  readonly subject?: string;
+  readonly done: boolean;
+}
+
+export interface SessionView {
+  readonly session: string;
+  readonly pane?: string;
+  /** The main agent first, then the others in order of arrival. */
+  readonly agents: readonly AgentView[];
+  readonly tasks: readonly TaskView[];
+}
+
+/** The whole office (`core::state::OfficeSnapshot`). */
+export interface OfficeSnapshot {
+  readonly v: number;
+  readonly sessions: readonly SessionView[];
 }
 
 /** The slice of the Tauri API used here; injected by tests. */
 export interface OfficeIpc {
   invoke<T>(cmd: string, args: Record<string, unknown>): Promise<T>;
-  channel(onMessage: (event: ReducedEvent) => void): unknown;
+  channel(onMessage: (event: OfficeEvent) => void): unknown;
 }
 
 export const tauriOfficeIpc: OfficeIpc = {
   invoke: (cmd, args) => invoke(cmd, args),
-  channel: (onMessage) => new Channel<ReducedEvent>(onMessage),
+  channel: (onMessage) => new Channel<OfficeEvent>(onMessage),
 };
 
+export interface OfficeListener {
+  /** The picture of the office, once, before any change. */
+  snapshot(snapshot: OfficeSnapshot): void;
+  /** Each change, in order. */
+  event(event: OfficeEvent): void;
+}
+
 /**
- * Subscribes to office events: `onEvent` gets the recent ones first, oldest
- * first, then each new one as it arrives.
+ * Subscribes to the office: `listener.snapshot` gets the picture first, then
+ * `listener.event` each change as it arrives.
  */
-export async function subscribeOffice(ipc: OfficeIpc, onEvent: (event: ReducedEvent) => void): Promise<void> {
-  // A new event can come through the channel before the recent ones are
-  // returned; hold it until they are delivered, so the order is kept.
-  let early: ReducedEvent[] | null = [];
-  const channel = ipc.channel((event) => (early ? early.push(event) : onEvent(event)));
-  const recent = await ipc.invoke<ReducedEvent[]>("office_subscribe", { events: channel });
-  for (const event of recent) onEvent(event);
+export async function subscribeOffice(ipc: OfficeIpc, listener: OfficeListener): Promise<void> {
+  // A change can come through the channel before the picture is returned;
+  // hold it until the picture is delivered, so nothing is applied out of order.
+  let early: OfficeEvent[] | null = [];
+  const channel = ipc.channel((event) => (early ? early.push(event) : listener.event(event)));
+  const snapshot = await ipc.invoke<OfficeSnapshot>("office_subscribe", { events: channel });
+  listener.snapshot(snapshot);
   const held = early;
   early = null;
-  for (const event of held) onEvent(event);
+  for (const event of held) listener.event(event);
 }

@@ -1,8 +1,9 @@
-// Debug list of office events (task B1 in docs/FASE2-PLANO.md): one line per
-// event in the office panel, until the scene exists (task C2). Only in builds
-// with VITE_OFFICE_DEBUG=1 (the e2e build); release builds leave it out.
+// Debug list of the office (task B1 in docs/FASE2-PLANO.md): the picture of
+// the office, then one line per change, in the office panel, until the scene
+// exists (task C2). Only in builds with VITE_OFFICE_DEBUG=1 (the e2e build);
+// release builds leave it out.
 
-import type { ReducedEvent } from "../transport/office";
+import type { AgentView, OfficeEvent, OfficeSnapshot } from "../transport/office";
 
 /** Lines kept in the list. */
 export const DEBUG_LINES = 200;
@@ -10,26 +11,30 @@ export const DEBUG_LINES = 200;
 /** Found by e2e/check-release.mjs: must never be in a release build. */
 export const OFFICE_DEBUG_MARKER = "termbay-e2e-office-debug";
 
-/** One readable line: event, who, and what (all fields already reduced). */
-export function formatEvent(event: ReducedEvent): string {
-  const who = event.teammate_name ?? event.agent_type ?? (event.agent_id ? "agent" : "main");
-  const what = [
-    event.tool,
-    event.file ?? event.program ?? event.pattern,
-    event.description,
-    event.to ? `→ ${event.to}` : undefined,
-    event.summary,
-    event.name,
-    event.task_subject,
-    event.status,
-    event.last_message,
-  ].filter((part): part is string => typeof part === "string" && part.length > 0);
-  return [event.event, who, ...what].join(" · ");
+/** Agent names seen so far, by session and id, to show names on later lines. */
+type Names = Map<string, string>;
+
+const key = (session: string, agent: string) => `${session}\u0000${agent}`;
+
+/** One readable line for a change: kind, who, and what. */
+export function formatEvent(event: OfficeEvent, names: Names = new Map()): string {
+  const who = event.name ?? names.get(key(event.session, event.agent)) ?? event.agent;
+  const to = event.to ? `→ ${names.get(key(event.session, event.to)) ?? event.to}` : undefined;
+  const what = [event.action, event.target, to, event.text, event.result, event.role, event.color].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  return [event.kind, who, ...what].join(" · ");
+}
+
+/** One readable line for an agent in the picture. */
+export function formatAgent(agent: AgentView): string {
+  return ["here", agent.name ?? agent.id, agent.activity, agent.bubble].filter(Boolean).join(" · ");
 }
 
 /** The list inside the office panel. */
 export class OfficeDebugList {
   private readonly list: HTMLOListElement;
+  private readonly names: Names = new Map();
 
   constructor(
     private readonly panel: HTMLElement,
@@ -41,17 +46,32 @@ export class OfficeDebugList {
     panel.replaceChildren(this.list);
   }
 
-  /** Adds a line (text only, never HTML) and shows the panel. */
-  add(event: ReducedEvent): void {
-    const item = this.list.ownerDocument.createElement("li");
-    item.textContent = formatEvent(event);
-    this.list.append(item);
-    while (this.list.children.length > DEBUG_LINES) this.list.firstElementChild?.remove();
-    item.scrollIntoView?.({ block: "nearest" });
-    this.panel.hidden = false;
+  /** The picture: one line per agent. Shows the panel if anyone is there. */
+  snapshot(snapshot: OfficeSnapshot): void {
+    for (const session of snapshot.sessions) {
+      for (const agent of session.agents) {
+        if (agent.name) this.names.set(key(session.session, agent.id), agent.name);
+        this.line(formatAgent(agent));
+      }
+    }
+  }
+
+  /** A change: one line (text only, never HTML), and the panel shows. */
+  event(event: OfficeEvent): void {
+    if (event.kind === "start" && event.name) this.names.set(key(event.session, event.agent), event.name);
+    this.line(formatEvent(event, this.names));
   }
 
   toggle(): void {
     this.panel.hidden = !this.panel.hidden;
+  }
+
+  private line(text: string): void {
+    const item = this.list.ownerDocument.createElement("li");
+    item.textContent = text;
+    this.list.append(item);
+    while (this.list.children.length > DEBUG_LINES) this.list.firstElementChild?.remove();
+    item.scrollIntoView?.({ block: "nearest" });
+    this.panel.hidden = false;
   }
 }
