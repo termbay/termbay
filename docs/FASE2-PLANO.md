@@ -1,6 +1,6 @@
 # Fase 2: plano do escritório
 
-> Status: proposta, 22/11/2026. As decisões da seção 2 só valem depois do aceite e então entram em [ARQUITETURA.md](ARQUITETURA.md).
+> Status: decisões E1–E10 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). Próximo passo: F1.
 > Objetivo: quando o `claude` roda dentro do termbay, um painel mostra o escritório em 2D, com o agente principal ("chefe") e cada subagente como funcionário. Eles chegam, trabalham com balões do que estão fazendo, esperam aprovação, trocam mensagens e vão embora. O terminal continua igual para quem não usa agentes.
 > Base: o que os hooks expõem está em [FASE0-HOOKS.md](FASE0-HOOKS.md). O terminal (fase 1, marcos 1 e 2) já reserva o painel `aside#office-panel` e o atalho Cmd/Ctrl+Shift+O.
 
@@ -143,9 +143,9 @@ Aceite de E1–E10
 | **Ligação `Agent → agent_id` em paralelo** (lacuna 3 da fase 0) | personagem chega "genérico" e ganha o nome quando o `PostToolUse` confirma; teste com a sessão B |
 | **Termos da Anthropic** (ponto em aberto da arquitetura) | a fase 2 só lê eventos do `claude` oficial do usuário e não muda o login; confirmar os termos antes do lançamento continua pendente |
 
-## 7. Decisões que precisam do aval do Guilherme
+## 7. Decisões aceitas
 
-As dez da seção 2. As que mais mudam o produto:
+As dez da seção 2, aceitas pelo Guilherme em 22/11/2026. As que mais mudam o produto:
 
 - **E1 + E7:** hooks instalados uma vez no `~/.claude/settings.json` do usuário, que não fazem nada fora do termbay.
 - **E4:** chaves do formato próprio em inglês, corrigindo o exemplo em português da arquitetura.
