@@ -143,10 +143,39 @@ export class App {
 
   /** Waits until the focused pane shows text matching `pattern`. */
   async waitFor(pattern, timeout) {
-    return until(`${pattern} in the focused pane`, async () => {
-      const text = await this.focusedText();
-      return pattern.test(text) ? text : false;
-    }, timeout);
+    try {
+      return await until(`${pattern} in the focused pane`, async () => {
+        const text = await this.focusedText();
+        return pattern.test(text) ? text : false;
+      }, timeout);
+    } catch (error) {
+      // Say where the keyboard and the text went, so a CI failure on a
+      // platform we cannot run locally is enough to find the cause.
+      const report = await this.focusReport().catch((e) => `focus report failed: ${e.message}`);
+      error.message += `\n${report}`;
+      throw error;
+    }
+  }
+
+  /** Which pane has the focus class, which element has the keyboard, and what each pane shows. */
+  async focusReport() {
+    const state = await this.run(`
+      const panel = [...document.querySelectorAll(".tab-panel")].find((p) => !p.hidden);
+      const describe = (el) => el ? el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\\s+/).join(".") : "") : null;
+      const active = document.activeElement;
+      return {
+        hasFocus: document.hasFocus(),
+        activeElement: describe(active),
+        activePane: active?.closest?.("[data-pane-id]")?.getAttribute("data-pane-id") ?? null,
+        focusedPane: panel?.querySelector("[data-pane-id].focused")?.getAttribute("data-pane-id") ?? null,
+        panes: panel ? [...panel.querySelectorAll("[data-pane-id]")].map((pane) => ({
+          id: pane.getAttribute("data-pane-id"),
+          focused: pane.classList.contains("focused"),
+          text: [...pane.querySelectorAll(".xterm-rows > div")].map((row) => row.textContent.replace(/\\u00a0/g, " ").trimEnd()).filter(Boolean).join("\\n"),
+        })) : [],
+      };
+    `);
+    return `focus report: ${JSON.stringify(state, null, 2)}`;
   }
 
   /** Bounding boxes of the panes in the visible tab and of the panel. */
