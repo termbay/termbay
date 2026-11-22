@@ -5,12 +5,16 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { confirmInPage } from "./layout/confirm";
+import type { OfficeContentLoader } from "./office/content";
+import { OfficePanel, localWidthStore } from "./office/panel";
+import { PanelModel } from "./office/panel-model";
 import { LayoutController } from "./layout/controller";
 import { installShortcuts } from "./layout/shortcuts";
 import { LayoutView } from "./layout/view";
 import { detectOs } from "./platform/os";
 import { TerminalView } from "./terminal/view";
 import { DEFAULT_CONFIG, loadConfig } from "./transport/config";
+import { subscribeOffice, tauriOfficeIpc, type OfficeListener } from "./transport/office";
 import { createTransport } from "./transport/select";
 import { tauriIpc } from "./transport/tauri";
 
@@ -63,31 +67,51 @@ async function main(): Promise<void> {
   });
   controller = app;
 
-  const officeDebug = inTauri && import.meta.env.VITE_OFFICE_DEBUG === "1" ? await startOfficeDebug() : null;
+  const office = startOffice(inTauri, config.office.autoOpen, () => {
+    const tab = app.layout.tabs.find((t) => t.id === app.layout.active);
+    if (tab) app.paneView(tab.focused)?.focus();
+  });
   installShortcuts(window, os, (action) => {
-    // Until the office panel exists (task B2), the shortcut shows the debug list.
-    if (action.type === "toggleOffice" && officeDebug) officeDebug.toggle();
+    if (action.type === "toggleOffice") office?.toggle();
     else app.run(action);
   });
 }
 
 /**
- * Debug list of the office (tasks B1 and D3), only in builds with
- * VITE_OFFICE_DEBUG=1. Loaded with import() behind that check, so release
- * builds do not contain it (e2e/check-release.mjs makes sure).
+ * The office panel (task B2, decision E9). The subscription starts now, to
+ * notice the first agent; the content is loaded with import() only on the
+ * first opening. Outside Tauri there is no office to listen to yet.
  */
-async function startOfficeDebug(): Promise<{ toggle(): void } | null> {
+function startOffice(inTauri: boolean, autoOpen: boolean, focusTerminal: () => void): OfficePanel | null {
+  const root = document.getElementById("app");
   const panel = document.getElementById("office-panel");
-  if (!panel) return null;
-  const [{ OfficeDebugList }, { subscribeOffice, tauriOfficeIpc }] = await Promise.all([
-    import("./office/debug"),
-    import("./transport/office"),
-  ]);
-  const list = new OfficeDebugList(panel);
-  subscribeOffice(tauriOfficeIpc, list).catch((error: unknown) =>
-    console.error("[termbay] could not subscribe to office events", error),
-  );
-  return list;
+  if (!root || !panel) return null;
+  const store = localWidthStore(() => window.localStorage);
+  const subscribe = (listener: OfficeListener) => subscribeOffice(tauriOfficeIpc, listener);
+  const office = new OfficePanel({
+    root,
+    panel,
+    model: new PanelModel({ autoOpen, width: store.load() }),
+    load: officeContent,
+    store,
+    resubscribe: subscribe,
+    focusTerminal,
+  });
+  if (inTauri) {
+    subscribe(office).catch((error: unknown) => console.error("[termbay] could not subscribe to office events", error));
+  }
+  return office;
 }
+
+/**
+ * What the panel shows. Builds with VITE_OFFICE_DEBUG=1 (the e2e build)
+ * show the debug list of tasks B1 and D3; release builds an empty panel
+ * until the scene exists (task C2). Each behind import(), so release builds
+ * do not contain the debug list (e2e/check-release.mjs makes sure).
+ */
+const officeContent: OfficeContentLoader =
+  import.meta.env.VITE_OFFICE_DEBUG === "1"
+    ? async (host) => new (await import("./office/debug")).OfficeDebugList(host)
+    : async (host) => (await import("./office/placeholder")).createPlaceholder(host);
 
 main().catch((error: unknown) => console.error("[termbay] failed to start", error));

@@ -517,11 +517,16 @@ describe("milestone 2 contract (FASE1-PLANO 6.3)", () => {
 
   it("loads the config with get_config, defaults outside Tauri and for bad fields", async () => {
     const ipc = new FakeIpc();
-    await expect(loadConfig(ipc)).resolves.toEqual({ autocomplete: { enabled: true, trigger: "ctrl+space", history: false } });
+    await expect(loadConfig(ipc)).resolves.toEqual({
+      autocomplete: { enabled: true, trigger: "ctrl+space", history: false },
+      office: { autoOpen: true },
+    });
     expect(ipc.callsOf("get_config")[0]?.args).toBeUndefined();
     await expect(loadConfig()).resolves.toEqual(DEFAULT_CONFIG);
-    ipc.config = { autocomplete: { enabled: "yes", trigger: "alt" } };
+    ipc.config = { autocomplete: { enabled: "yes", trigger: "alt" }, office: { auto_open: "no" } };
     await expect(loadConfig(ipc)).resolves.toEqual(DEFAULT_CONFIG);
+    ipc.config = { office: { auto_open: false } };
+    await expect(loadConfig(ipc)).resolves.toEqual({ ...DEFAULT_CONFIG, office: { autoOpen: false } });
     ipc.failWith.get_config = "boom";
     await expect(loadConfig(ipc)).rejects.toThrow(new Error("boom"));
   });

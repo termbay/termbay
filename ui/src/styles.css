@@ -209,13 +209,75 @@ body {
   font: inherit;
 }
 
+/* Office panel (task B2): width set by the panel from the divider, within limits. */
 #office-panel {
-  flex: 0 0 320px;
-  border-left: 1px solid #2a2e36;
+  flex: 0 0 auto;
+  width: 360px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #101216;
+  overflow: hidden;
 }
 
-#office-panel[hidden] {
+#office-panel[hidden],
+.office-divider[hidden] {
   display: none;
+}
+
+.office-divider {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: #2a2e36;
+  touch-action: none;
+}
+
+.office-divider:hover,
+.office-divider:focus-visible,
+.office-resizing .office-divider {
+  background: #4a5060;
+  outline: none;
+}
+
+/* While dragging, the terminals must not select text under the pointer. */
+.office-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.office-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid #2a2e36;
+  font: 12px system-ui, sans-serif;
+  color: #9aa0ab;
+  user-select: none;
+}
+
+.office-close {
+  border: 0;
+  border-radius: 4px;
+  padding: 0 6px;
+  background: transparent;
+  color: inherit;
+  font: 16px/1.4 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.office-close:hover,
+.office-close:focus-visible {
+  background: #23262e;
+  color: #d6d9e0;
+}
+
+.office-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
 }
 
 /* Debug list of office events (e2e builds only, task B1). */
