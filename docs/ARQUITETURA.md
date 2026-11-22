@@ -163,7 +163,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 0. **Teste dos hooks (1–2 dias):** registrar todos os eventos de uma sessão real com agentes e times e decidir o que dá pra animar. Feito em 16/11/2026 com subagentes e com um time in-process em sessão interativa ([FASE0-HOOKS.md](FASE0-HOOKS.md)).
 1. **Terminal base:** Tauri + core + xterm.js, com abas e divisão de tela. Plano, tarefas e decisões em [FASE1-PLANO.md](FASE1-PLANO.md).
    - **Autocompletar (marco A em andamento, logo depois do marco 1):** menu de sugestões do próprio shell, via integração com o shell (OSC 133 + OSC privado), base também dos blocos da fase 5. Desenho, tarefas e decisões em [AUTOCOMPLETE.md](AUTOCOMPLETE.md).
-2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões.
+2. **Escritório:** painel PixiJS lendo eventos dos hooks, com personagens e balões. Plano, tarefas e decisões em [FASE2-PLANO.md](FASE2-PLANO.md).
 3. **Recrutador:** `termbay init` com catálogo de cargos.
 4. **Conversa entre agentes:** times do Claude Code nos balões.
 5. **Extras:** blocos estilo Warp, modo navegador polido, tradutores para outras ferramentas, 3D opcional.
