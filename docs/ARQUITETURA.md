@@ -40,11 +40,12 @@ O termbay usa o **Claude Code oficial** (`claude`) que o usuário instala e no q
 
 ```
 termbay/
-├── core/         Rust, binário único `termbay`
+├── core/         Rust, biblioteca usada pelo app e pelo hook
 │   ├── pty         abre o shell do usuário (portable-pty)
 │   ├── eventos     servidor local que recebe eventos dos hooks
 │   ├── estado      agentes, mesas, o que cada um está fazendo
-│   └── cli         subcomandos: hook, init, serve, doctor
+│   └── cli         subcomandos: hooks, init, serve, doctor
+├── hook/         Rust, binário `termbay-hook`, pequeno e sem Tauri (E11)
 ├── ui/           TypeScript, sem framework pesado
 │   ├── terminal    xterm.js (abas, divisão de tela, busca)
 │   └── escritorio  PixiJS, 2D pixel art

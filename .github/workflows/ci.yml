@@ -378,12 +378,15 @@ jobs:
           - os: macos-latest
             bundles: app,dmg
             binary: target/release/termbay
+            hook: target/release/termbay-hook
           - os: ubuntu-22.04
             bundles: deb,rpm
             binary: target/release/termbay
+            hook: target/release/termbay-hook
           - os: windows-latest
             bundles: nsis
             binary: target/release/termbay.exe
+            hook: target/release/termbay-hook.exe
     steps:
       - name: Keep LF line endings on Windows
         if: runner.os == 'Windows'
@@ -471,6 +474,17 @@ jobs:
       # separate hook binary; then a budget goes here.
       - name: Measure startup time
         run: node scripts/measure-startup.mjs "${{ matrix.binary }}" --runs 50 --title "Startup on ${{ runner.os }}"
+
+      # The hook's own binary (decision E11): small, without Tauri, and
+      # quick to start, since PreToolUse holds every tool call until it exits.
+      - name: Build termbay-hook
+        run: cargo build --release --locked -p termbay-hook
+
+      - name: termbay-hook size and startup time
+        run: |
+          bash scripts/check-size.sh --title "termbay-hook on ${{ runner.os }}" "${{ matrix.hook }}"
+          node scripts/measure-startup.mjs "${{ matrix.hook }}" --runs 50 --budget-ms 10 \
+            --title "termbay-hook startup on ${{ runner.os }}" -- PreToolUse
 
   licenses:
     name: licenses

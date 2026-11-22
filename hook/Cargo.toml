@@ -1,0 +1,23 @@
+[package]
+name = "termbay-hook"
+description = "Small helper that Claude Code hooks run to send office events to the termbay app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+# Its own binary, without Tauri, because Claude Code spawns it once per event
+# and the app binary starts too slowly for that on Linux (decision E11 in
+# docs/FASE2-PLANO.md).
+[[bin]]
+name = "termbay-hook"
+path = "src/main.rs"
+
+[dependencies]
+termbay-core.workspace = true
+serde_json = "1"
+
+[lints]
+workspace = true
