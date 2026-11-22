@@ -466,6 +466,12 @@ jobs:
           fi
           bash scripts/check-size.sh --title "Sizes on ${{ runner.os }}" "${artifacts[@]}"
 
+      # Claude Code spawns `termbay hook` once per event (F1 in docs/FASE2-PLANO.md).
+      # Report only until the numbers decide between this binary and a small
+      # separate hook binary; then a budget goes here.
+      - name: Measure startup time
+        run: node scripts/measure-startup.mjs "${{ matrix.binary }}" --runs 50 --title "Startup on ${{ runner.os }}"
+
   licenses:
     name: licenses
     runs-on: ubuntu-22.04
