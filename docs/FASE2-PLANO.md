@@ -1,6 +1,6 @@
 # Fase 2: plano do escritório
 
-> Status: decisões E1–E11 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). F1, A1, D1, A2 e A3 feitas (servidor, redutor e variáveis em `core::events`; binário em `hook/`). Próximo passo: D2, com o empacotamento do `termbay-hook`.
+> Status: decisões E1–E11 aceitas em 22/11/2026 e registradas em [ARQUITETURA.md](ARQUITETURA.md). F1, A1, D1, A2, A3 e B1 feitas (servidor, redutor e variáveis em `core::events`; binário em `hook/`; `office_subscribe` e lista de depuração no build do e2e). D2 em revisão (PR #7). Próximo passo: D3, o tradutor com estado.
 > Objetivo: quando o `claude` roda dentro do termbay, um painel mostra o escritório em 2D, com o agente principal ("chefe") e cada subagente como funcionário. Eles chegam, trabalham com balões do que estão fazendo, esperam aprovação, trocam mensagens e vão embora. O terminal continua igual para quem não usa agentes.
 > Base: o que os hooks expõem está em [FASE0-HOOKS.md](FASE0-HOOKS.md). O terminal (fase 1, marcos 1 e 2) já reserva o painel `aside#office-panel` e o atalho Cmd/Ctrl+Shift+O.
 

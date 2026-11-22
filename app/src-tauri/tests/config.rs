@@ -17,7 +17,8 @@ fn prototype_freezing_stays_off() {
 }
 
 /// The main window may call the pty commands (with `pty_complete` and
-/// `pty_info`), `get_config`, listen to events (for `pty-exit`) and close
+/// `pty_info`), `get_config`, `office_subscribe` (phase 2), listen to events
+/// (for `pty-exit`) and close
 /// itself (D19), and nothing else: no shell, fs or http plugins.
 #[test]
 fn main_capability_grants_only_the_pty_commands_and_event_listening() {
@@ -37,6 +38,7 @@ fn main_capability_grants_only_the_pty_commands_and_event_listening() {
         permissions,
         [
             "allow-get-config",
+            "allow-office-subscribe",
             "allow-pty-ack",
             "allow-pty-close",
             "allow-pty-complete",

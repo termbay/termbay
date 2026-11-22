@@ -11,6 +11,7 @@ const COMMANDS: &[&str] = &[
     "pty_complete",
     "pty_info",
     "get_config",
+    "office_subscribe",
 ];
 
 fn main() {

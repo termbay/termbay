@@ -217,3 +217,14 @@ body {
 #office-panel[hidden] {
   display: none;
 }
+
+/* Debug list of office events (e2e builds only, task B1). */
+.office-debug {
+  margin: 0;
+  padding: 8px 8px 8px 28px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  font: 11px/1.5 ui-monospace, Menlo, Consolas, monospace;
+  color: #aab0bc;
+}

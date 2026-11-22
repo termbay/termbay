@@ -20,6 +20,8 @@
 //! window with `{ id, exitCode }`, after its last output was sent.
 //! Errors are readable strings.
 
+use std::sync::Arc;
+
 use serde::Serialize;
 use tauri::http::HeaderMap;
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
@@ -29,6 +31,7 @@ use termbay_core::config::{self, Config};
 use termbay_core::pty::PtyInfo;
 
 use crate::bridge::{PtyBridge, PtyExit};
+use crate::office::OfficeHub;
 
 /// Header that carries the pty id of a `pty_write` call.
 pub const PTY_ID_HEADER: &str = "termbay-pty-id";
@@ -54,10 +57,22 @@ impl From<PtyExit> for PtyExitPayload {
     }
 }
 
-/// Registers the bridge state, the commands and the cleanup on window close.
+/// [`register_with_office`] with a hub of its own, for tests.
+#[cfg(test)]
 pub fn register<R: Runtime>(builder: tauri::Builder<R>, bridge: PtyBridge) -> tauri::Builder<R> {
+    register_with_office(builder, bridge, Arc::default())
+}
+
+/// Registers the bridge state, the office hub the event server publishes to
+/// (task B1), the commands and the cleanup on window close.
+pub fn register_with_office<R: Runtime>(
+    builder: tauri::Builder<R>,
+    bridge: PtyBridge,
+    office: Arc<OfficeHub>,
+) -> tauri::Builder<R> {
     builder
         .manage(bridge)
+        .manage(office)
         .invoke_handler(tauri::generate_handler![
             pty_open,
             pty_write,
@@ -66,7 +81,8 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>, bridge: PtyBridge) -> ta
             pty_ack,
             pty_info,
             get_config,
-            crate::complete::pty_complete
+            crate::complete::pty_complete,
+            crate::office::office_subscribe
         ])
         .on_window_event(on_window_event)
 }
@@ -542,6 +558,26 @@ mod tests {
         };
         assert!(message(MAIN_WINDOW).contains("no pty"));
         assert!(!message("other").contains("no pty"));
+        // `office_subscribe` without its channel fails in the main window
+        // (it reached the command) and is refused before that elsewhere.
+        let office = || {
+            request(
+                "office_subscribe",
+                InvokeBody::Json(json!({})),
+                HeaderMap::new(),
+            )
+        };
+        let office_error = |label: &str| {
+            get_ipc_response(&window(label), office())
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(
+            office_error(MAIN_WINDOW).contains("events"),
+            "{}",
+            office_error(MAIN_WINDOW)
+        );
+        assert!(!office_error("other").contains("events"));
         // A command that does not exist is not reachable either.
         let unknown = request("pty_spy", InvokeBody::Json(json!({})), HeaderMap::new());
         assert!(get_ipc_response(&window(MAIN_WINDOW), unknown).is_err());

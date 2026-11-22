@@ -11,6 +11,7 @@
 use std::ffi::OsString;
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use termbay_core::cli::{self, CliError, Command};
 use termbay_core::events::EventServer;
@@ -20,6 +21,7 @@ mod commands;
 mod complete;
 #[cfg(any(target_os = "macos", test))]
 mod menu;
+mod office;
 #[cfg(all(test, unix))]
 mod security_tests;
 
@@ -82,9 +84,13 @@ struct OfficeEvents {
 /// (decision E1 in `docs/FASE2-PLANO.md`). The terminal comes first: if the
 /// server cannot start, shells open without the variables and `termbay-hook`
 /// does nothing.
-fn with_event_server(bridge: bridge::PtyBridge) -> (bridge::PtyBridge, OfficeEvents) {
-    // Events are dropped until the office panel subscribes to them (task B1).
-    match EventServer::start(|_event| {}) {
+fn with_event_server(
+    bridge: bridge::PtyBridge,
+    office: &Arc<office::OfficeHub>,
+) -> (bridge::PtyBridge, OfficeEvents) {
+    // Every accepted event goes to the hub, which the UI subscribes to (B1).
+    let hub = Arc::clone(office);
+    match EventServer::start(move |event| hub.publish(event)) {
         Ok(server) => {
             let bridge = bridge.with_hook_env(server.hook_env());
             (
@@ -114,8 +120,9 @@ fn run_app() -> ExitCode {
     let builder = builder.menu(menu::build);
     let mut context = context();
     pass_driver_browser_args(&mut context);
-    let (bridge, events) = with_event_server(bridge::PtyBridge::new());
-    let app = commands::register(builder, bridge)
+    let office = Arc::new(office::OfficeHub::default());
+    let (bridge, events) = with_event_server(bridge::PtyBridge::new(), &office);
+    let app = commands::register_with_office(builder, bridge, office)
         .manage(events)
         .build(context);
     match app {
