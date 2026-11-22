@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use super::env::HookEnv;
 use super::model::ReducedEvent;
 
 /// Path of the only endpoint.
@@ -79,6 +80,11 @@ impl EventServer {
     /// Token to give to hooks (`TERMBAY_TOKEN`): 64 hex characters.
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    /// Address and token, to put in the environment of each shell.
+    pub fn hook_env(&self) -> HookEnv {
+        HookEnv::new(self.addr, self.token.clone())
     }
 }
 

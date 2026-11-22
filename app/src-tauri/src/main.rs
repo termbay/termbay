@@ -13,6 +13,7 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use termbay_core::cli::{self, CliError, Command};
+use termbay_core::events::EventServer;
 
 mod bridge;
 mod commands;
@@ -72,6 +73,35 @@ fn print_and_exit(text: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Keeps the event server alive for as long as the app runs.
+struct OfficeEvents {
+    _server: Option<EventServer>,
+}
+
+/// Starts the event server and gives its address and token to every shell
+/// (decision E1 in `docs/FASE2-PLANO.md`). The terminal comes first: if the
+/// server cannot start, shells open without the variables and `termbay-hook`
+/// does nothing.
+fn with_event_server(bridge: bridge::PtyBridge) -> (bridge::PtyBridge, OfficeEvents) {
+    // Events are dropped until the office panel subscribes to them (task B1).
+    match EventServer::start(|_event| {}) {
+        Ok(server) => {
+            let bridge = bridge.with_hook_env(server.hook_env());
+            (
+                bridge,
+                OfficeEvents {
+                    _server: Some(server),
+                },
+            )
+        }
+        Err(err) => {
+            e2e_log::write(&format!("event server not started: {err}"));
+            let _ = writeln!(std::io::stderr(), "termbay: office events are off: {err}");
+            (bridge, OfficeEvents { _server: None })
+        }
+    }
+}
+
 fn run_app() -> ExitCode {
     let builder = tauri::Builder::default().setup(|app| {
         disable_browser_keys(app);
@@ -84,7 +114,10 @@ fn run_app() -> ExitCode {
     let builder = builder.menu(menu::build);
     let mut context = context();
     pass_driver_browser_args(&mut context);
-    let app = commands::register(builder, bridge::PtyBridge::new()).build(context);
+    let (bridge, events) = with_event_server(bridge::PtyBridge::new());
+    let app = commands::register(builder, bridge)
+        .manage(events)
+        .build(context);
     match app {
         Ok(app) => {
             e2e_log::write("app built, entering the event loop");

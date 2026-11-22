@@ -83,6 +83,11 @@ pub struct SpawnOptions {
     pub env: Vec<(OsString, OsString)>,
     /// Initial size.
     pub size: PtySize,
+    /// Event server for `termbay-hook` (decision E1 in `docs/FASE2-PLANO.md`).
+    /// [`crate::pty::PtyManager::spawn`] turns it into `TERMBAY_EVENTS`,
+    /// `TERMBAY_TOKEN` and `TERMBAY_PANE` (the session id);
+    /// [`PtySession::spawn`] alone ignores it, as it has no id.
+    pub hook_env: Option<crate::events::HookEnv>,
     /// Flow control: when set, the reader thread waits on this gate before
     /// each read (see [`ReadGate`]). The session opens it for good when the
     /// shell exits or is killed, so the rest of the output is drained.
@@ -212,6 +217,11 @@ impl PtySession {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "termbay");
         cmd.env("TERM_PROGRAM_VERSION", crate::VERSION);
+        // Never inherited from termbay's own environment: a termbay started
+        // inside another one must not send this shell's events to the other.
+        for key in crate::events::env::HOOK_VARS {
+            cmd.env_remove(key);
+        }
         for (key, value) in &options.env {
             cmd.env(key, value);
         }

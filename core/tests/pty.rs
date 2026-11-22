@@ -536,6 +536,50 @@ fn manager_routes_events_by_id_and_forgets_exited_sessions() {
     eventually("the exited session is forgotten", || manager.is_empty());
 }
 
+/// The manager puts the event server's address, its token and the session
+/// id in the shell's environment (decision E1, `docs/FASE2-PLANO.md`).
+#[test]
+fn manager_gives_each_shell_the_hook_variables() {
+    let token = "ab".repeat(32);
+    let hook_env =
+        termbay_core::events::HookEnv::new("127.0.0.1:4242".parse().unwrap(), token.clone());
+    let manager = PtyManager::new();
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let id = manager
+        .spawn(
+            SpawnOptions {
+                hook_env: Some(hook_env),
+                ..plain_shell()
+            },
+            move |_, event| {
+                if let PtyEvent::Output(bytes) = event {
+                    let _ = tx.send(bytes.to_vec());
+                }
+            },
+        )
+        .unwrap();
+    let command = if cfg!(windows) {
+        "echo %TERMBAY_EVENTS%^|%TERMBAY_TOKEN%^|%TERMBAY_PANE%\r"
+    } else {
+        "echo \"$TERMBAY_EVENTS|$TERMBAY_TOKEN|$TERMBAY_PANE\"\r"
+    };
+    manager.write(id, command.as_bytes()).unwrap();
+
+    let expected = format!("127.0.0.1:4242|{token}|{id}");
+    let mut output = String::new();
+    let mut queries = CursorQueries::default();
+    let deadline = Instant::now() + TIMEOUT;
+    while !output.contains(&expected) {
+        assert!(Instant::now() < deadline, "output so far:\n{output}");
+        if let Ok(bytes) = rx.recv_timeout(Duration::from_millis(50)) {
+            for _ in 0..queries.count(&bytes) {
+                let _ = manager.write(id, CURSOR_ANSWER);
+            }
+            output.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+}
+
 #[test]
 fn dropping_the_manager_kills_every_shell() {
     let manager = PtyManager::new();

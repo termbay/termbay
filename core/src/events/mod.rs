@@ -6,12 +6,15 @@
 //! - [`server`]: the local server that receives reduced events (task A1).
 //! - [`model`]: the reduced event shared by both.
 //! - [`text`]: cleaning and cutting of everything a bubble may show.
+//! - [`env`]: the variables that tell `termbay-hook` where the app is.
 
+pub mod env;
 pub mod model;
 pub mod reduce;
 pub mod server;
 pub mod text;
 
+pub use env::HookEnv;
 pub use model::{KEPT_EVENTS, REDUCED_EVENT_VERSION, ReducedEvent};
 pub use reduce::reduce;
 pub use server::EventServer;

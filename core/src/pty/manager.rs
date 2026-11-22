@@ -64,15 +64,21 @@ impl PtyManager {
 
     /// Starts a new session and returns its id.
     ///
+    /// With [`SpawnOptions::hook_env`], the shell gets the variables of
+    /// [`crate::events::env`], with this session's id as `TERMBAY_PANE`.
+    ///
     /// `on_event` receives the id with every event, so one callback can
     /// route the events of many sessions. The same rules as in
     /// [`PtySession::spawn`] apply. Do not call [`PtyManager::kill`] or
     /// [`PtyManager::kill_all`] from inside the callback.
-    pub fn spawn<F>(&self, options: SpawnOptions, mut on_event: F) -> Result<PtyId, PtyError>
+    pub fn spawn<F>(&self, mut options: SpawnOptions, mut on_event: F) -> Result<PtyId, PtyError>
     where
         F: FnMut(PtyId, PtyEvent<'_>) + Send + 'static,
     {
         let id = PtyId(self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
+        if let Some(hook_env) = options.hook_env.take() {
+            options.env.extend(hook_env.vars(id.as_u64()));
+        }
         let sessions: Weak<Mutex<SessionMap>> = Arc::downgrade(&self.sessions);
 
         let session = PtySession::spawn(options, move |event| {

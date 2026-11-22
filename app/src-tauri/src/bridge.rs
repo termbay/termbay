@@ -126,6 +126,13 @@ impl PtyBridge {
         Self::with_shell_support(template, ShellSupport::disabled())
     }
 
+    /// Gives every shell opened from now on the event server's variables
+    /// (decision E1 in `docs/FASE2-PLANO.md`).
+    pub fn with_hook_env(mut self, hook_env: termbay_core::events::HookEnv) -> Self {
+        self.template.hook_env = Some(hook_env);
+        self
+    }
+
     /// Same, with the given shell integration settings.
     pub fn with_shell_support(template: SpawnOptions, shell: ShellSupport) -> Self {
         Self {
