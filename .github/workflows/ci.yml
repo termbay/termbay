@@ -184,9 +184,6 @@ jobs:
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    # Windows e2e does not start yet (msedgedriver cannot reach WebView2:
-    # "DevToolsActivePort file doesn't exist"). Not blocking until fixed.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
