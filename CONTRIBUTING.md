@@ -58,6 +58,18 @@ cd ui && npm run licenses
 node --test "scripts/*.test.mjs"
 ```
 
+## Gerar os pacotes na sua máquina
+
+Os pacotes levam o `termbay-hook` ao lado do `termbay`. Ele é um binário à parte e precisa ser preparado antes do `tauri build`:
+
+```sh
+cd ui && npm ci && npm run build && cd ..
+bash scripts/prepare-hook-sidecar.sh
+ui/node_modules/.bin/tauri build --config app/src-tauri/tauri.hook.conf.json
+```
+
+O `tauri.hook.conf.json` fica fora do `tauri.conf.json` de propósito: assim o `cargo build` e o `cargo test` continuam funcionando sem esse passo.
+
 ## Ferramentas opcionais
 
 - **[Graphify](https://github.com/Graphify-Labs/graphify)** (Apache-2.0): monta um grafo do código para você ou o seu assistente de IA navegar no repositório sem depender de grep. É só para desenvolvimento: não entra no binário nem nas dependências do projeto, e o grafo gerado (`graphify-out/`) fica fora do git.
