@@ -58,6 +58,17 @@ cd ui && npm run licenses
 node --test "scripts/*.test.mjs"
 ```
 
+## Ferramentas opcionais
+
+- **[Graphify](https://github.com/Graphify-Labs/graphify)** (Apache-2.0): monta um grafo do código para você ou o seu assistente de IA navegar no repositório sem depender de grep. É só para desenvolvimento: não entra no binário nem nas dependências do projeto, e o grafo gerado (`graphify-out/`) fica fora do git.
+
+  ```sh
+  pipx install graphifyy   # ou: uv tool install graphifyy (requer Python 3.11+)
+  graphify .               # gera graphify-out/ com graph.html, graph.json e GRAPH_REPORT.md
+  ```
+
+  A análise do código é local. Documentos, PDFs e imagens podem passar pelo modelo do seu assistente ou por uma API que você configurar.
+
 ## Fluxo
 
 1. Faça um fork e crie uma branch a partir de `main` (`feat/abas`, `fix/redimensionar-pty`...).

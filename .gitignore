@@ -34,3 +34,6 @@ Thumbs.db
 
 # Gravações de eventos da fase 0 sem anonimizar
 recordings/raw/
+
+# Graphify: grafo do código gerado localmente (ferramenta opcional de desenvolvimento)
+graphify-out/
