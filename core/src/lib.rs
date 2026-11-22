@@ -9,12 +9,14 @@
 //! - [`shell_integration`]: scripts, nonce and marks of integrated shells.
 //! - [`complete`]: the autocomplete engine and history readers.
 //! - [`events`]: office events: hook payload reducer and local event server.
+//! - [`hooks`]: `termbay hooks install`: registers `termbay-hook` in Claude Code.
 //! - [`state`]: the office: who is there and what each one does (phase 2).
 
 pub mod cli;
 pub mod complete;
 pub mod config;
 pub mod events;
+pub mod hooks;
 pub mod pty;
 pub mod shell_integration;
 pub mod state;
