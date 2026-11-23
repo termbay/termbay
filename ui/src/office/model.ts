@@ -420,10 +420,16 @@ export class OfficeModel {
     };
   }
 
-  /** Main first, then in order of arrival; over the limit, the oldest free one goes. */
+  /**
+   * Main first, then in order of arrival. Over the limit, a character already
+   * leaving goes first (the core evicted it and sent its end before this
+   * arrival), and only then the oldest one, so the scene keeps the same
+   * agents as the core.
+   */
   private addAgent(session: Session, c: Character): void {
     if (session.agents.length >= MAX_AGENTS) {
-      const i = session.agents.findIndex((a) => a.id !== MAIN_AGENT);
+      let i = session.agents.findIndex((a) => a.leaving);
+      if (i < 0) i = session.agents.findIndex((a) => a.id !== MAIN_AGENT);
       if (i >= 0) session.agents.splice(i, 1);
     }
     if (c.id === MAIN_AGENT) session.agents.unshift(c);

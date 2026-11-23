@@ -190,6 +190,20 @@ describe("PixiRenderer", () => {
     pixi.state.failInit = true;
     await expect(PixiRenderer.create(document.createElement("div"), SIZE)).rejects.toThrow("no WebGL");
     expect(pixi.Ticker.system.autoStart).toBe(true);
+    expect(pixi.state.apps[0]?.destroy).toHaveBeenCalledWith({ removeView: true });
+  });
+
+  it("a failing cleanup after a failed init does not hide the first error", async () => {
+    pixi.state.failInit = true;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const create = PixiRenderer.create(document.createElement("div"), SIZE);
+    pixi.state.apps[0]?.destroy.mockImplementation(() => {
+      throw new Error("half made");
+    });
+    await expect(create).rejects.toThrow("no WebGL");
+    expect(error).toHaveBeenCalled();
+    expect(pixi.Ticker.system.autoStart).toBe(true);
+    error.mockRestore();
   });
 
   it("destroys the sprite of a character that is gone", async () => {
