@@ -17,7 +17,7 @@ import type { SceneFrame, SceneRenderer } from "./controller";
 import { DESK_FRONT, SEAT_OFFSET, type OfficeLayout, type Point, type Size } from "./layout";
 import { lookFor, type Look } from "./look";
 import type { BubbleMark } from "./mapping";
-import type { CharacterView } from "./model";
+import { POP_MS, type CharacterView } from "./model";
 
 const FONT = "Menlo, Consolas, 'DejaVu Sans Mono', monospace";
 const FONT_SIZE = 10;
@@ -93,7 +93,7 @@ class CharacterSprite {
     this.bubble.addChild(this.bubbleBack, this.bubbleText);
   }
 
-  update(view: CharacterView, scale: number, time: number, size: Size): void {
+  update(view: CharacterView, scale: number, size: Size): void {
     const lookKey = `${view.key}|${view.color ?? ""}`;
     if (lookKey !== this.lookKey) {
       this.look = lookFor(view.key, view.color);
@@ -101,13 +101,14 @@ class CharacterSprite {
       this.poseKey = "";
     }
     const u = Math.max(1, Math.round(2 * scale));
-    const seated = view.place === "desk" && !view.walking;
+    const seated = view.seated;
+    // Pose frames come from the model, which also says when they change next.
     const pose: Pose = {
       u,
       seated,
-      stepFrame: view.walking ? Math.floor(time / 160) % 2 : 0,
-      typeFrame: seated && view.activity === "working" ? Math.floor(time / 180) % 2 : 0,
-      dots: seated && view.activity === "waiting" ? Math.floor(time / 400) % 4 : 0,
+      stepFrame: view.stepFrame,
+      typeFrame: view.typeFrame,
+      dots: view.dots,
       cup: view.place === "coffee" && !view.walking,
       main: view.main,
       facing: view.facing,
@@ -162,7 +163,7 @@ class CharacterSprite {
     // Above the head, kept inside the panel.
     const half = this.bubble.width / 2;
     const bx = Math.min(Math.max(x, half + 2), Math.max(half + 2, size.width - half - 2));
-    this.bubble.scale.set(Math.min(1, 0.85 + view.bubbleAge / 800));
+    this.bubble.scale.set(Math.min(1, 0.85 + (0.15 * view.bubbleAge) / POP_MS));
     this.bubble.position.set(Math.round(bx), Math.round(Math.max(top, this.bubble.height + 2)));
   }
 
@@ -285,6 +286,28 @@ function roomKey(layout: OfficeLayout): string {
   return JSON.stringify([layout.size, layout.scale, layout.desks]);
 }
 
+// Ticker.system is PixiJS's global ticker. Its autoStart is true, so any
+// listener added to it (the renderer's scheduler adds one in init, pointer
+// events another) starts a requestAnimationFrame loop that never ends, even
+// with the office hidden; stopping it is not enough, since the next listener
+// starts it again. So autoStart is turned off while an office renderer
+// exists, and Ticker.system only advances inside our frames (draw). The
+// office is the only PixiJS user in the app; the previous value comes back
+// when the last renderer is destroyed.
+let tickerHolds = 0;
+let previousAutoStart = true;
+
+function holdSystemTicker(): void {
+  if (tickerHolds++ === 0) previousAutoStart = Ticker.system.autoStart;
+  Ticker.system.autoStart = false;
+  Ticker.system.stop();
+}
+
+function releaseSystemTicker(): void {
+  if (tickerHolds === 0) return;
+  if (--tickerHolds === 0) Ticker.system.autoStart = previousAutoStart;
+}
+
 export class PixiRenderer implements SceneRenderer {
   private readonly room = new Graphics();
   /** Characters and desks, sorted by depth (zIndex = y). */
@@ -294,6 +317,7 @@ export class PixiRenderer implements SceneRenderer {
   private readonly sprites = new Map<string, CharacterSprite>();
   private desks: Graphics[] = [];
   private roomDrawn = "";
+  private destroyed = false;
   private size: Size = { width: 0, height: 0 };
 
   private constructor(private readonly app: Application) {
@@ -302,11 +326,10 @@ export class PixiRenderer implements SceneRenderer {
 
   /** Creates the canvas inside `container`. Rejects if WebGL is not available. */
   static async create(container: HTMLElement, size: Size): Promise<PixiRenderer> {
-    // Never let PixiJS run frames by itself (see the header).
-    Ticker.system.autoStart = false;
-    Ticker.system.stop();
+    holdSystemTicker();
     const app = new Application();
-    await app.init({
+    try {
+      await app.init({
       width: Math.max(1, size.width),
       height: Math.max(1, size.height),
       background: COLORS.background,
@@ -318,7 +341,11 @@ export class PixiRenderer implements SceneRenderer {
       sharedTicker: false,
       preference: "webgl",
       eventFeatures: { move: false, globalMove: false, click: true, wheel: false },
-    });
+      });
+    } catch (error) {
+      releaseSystemTicker();
+      throw error;
+    }
     app.stop();
     Ticker.system.stop();
     app.canvas.classList.add("office-canvas");
@@ -350,7 +377,7 @@ export class PixiRenderer implements SceneRenderer {
         this.labels.addChild(sprite.label);
         this.bubbles.addChild(sprite.bubble);
       }
-      sprite.update(view, frame.layout.scale, frame.time, this.size);
+      sprite.update(view, frame.layout.scale, this.size);
       // The newest bubble on top.
       sprite.bubble.zIndex = -view.bubbleAge;
     }
@@ -366,9 +393,14 @@ export class PixiRenderer implements SceneRenderer {
   }
 
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     for (const sprite of this.sprites.values()) sprite.destroy();
     this.sprites.clear();
+    for (const desk of this.desks) desk.destroy();
+    this.desks = [];
     this.app.destroy({ removeView: true }, { children: true });
+    releaseSystemTicker();
   }
 
   private redrawDesks(layout: OfficeLayout): void {

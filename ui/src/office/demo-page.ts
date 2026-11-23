@@ -4,6 +4,10 @@
 import { playDemo } from "./demo";
 import { mountOfficeScene } from "./scene";
 
+/** Found by e2e/check-release.mjs: the demo must never be in a release build. */
+const OFFICE_DEMO_MARKER = "termbay-office-demo";
+document.body.dataset.marker = OFFICE_DEMO_MARKER;
+
 const container = document.getElementById("office") as HTMLElement;
 const status = document.getElementById("status") as HTMLElement;
 const scene = await mountOfficeScene(container);

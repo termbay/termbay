@@ -23,6 +23,12 @@ export const WALK_SPEED = 90;
 export const LINGER_MS = 2500;
 /** How long a cue (a one-shot movement) lasts. */
 export const CUE_MS = 700;
+/** How long a bubble takes to pop in. */
+export const POP_MS = 150;
+/** Animation frames: legs while walking, hands while typing, dots while thinking. */
+export const STEP_FRAME_MS = 160;
+export const TYPE_FRAME_MS = 180;
+export const THINK_FRAME_MS = 400;
 /**
  * How long a bubble shows. Waiting and error bubbles stay until the next
  * change: they need the user's eyes.
@@ -62,6 +68,14 @@ export interface CharacterView {
   /** Horizontal direction it last walked: -1 left, 1 right. */
   readonly facing: -1 | 1;
   readonly history: readonly Bubble[];
+  /** Pose frames, so the renderer draws only what the model says changed. */
+  readonly seated: boolean;
+  /** Legs while walking (0 or 1). */
+  readonly stepFrame: number;
+  /** Hands while typing at the desk (0 or 1). */
+  readonly typeFrame: number;
+  /** Thinking dots while waiting at the desk (0 to 3). */
+  readonly dots: number;
 }
 
 interface Character {
@@ -121,6 +135,8 @@ const keyOf = (session: string, agent: string) => `${session}\u0000${agent}`;
 export class OfficeModel {
   private sessions: Session[] = [];
   private size: Size;
+  /** Scene time: only advances in `step`, so poses freeze while hidden. */
+  private time = 0;
   private current: OfficeLayout;
 
   constructor(size: Size = { width: 320, height: 480 }) {
@@ -208,8 +224,12 @@ export class OfficeModel {
     c.cueMs = 0;
     if (event.kind === "end") {
       if (c.id !== MAIN_AGENT) c.lingerMs = LINGER_MS;
-      // Only the end of the session gives the main agent a result
-      // (core::state: SessionEnd), after the end of everyone else.
+      // core::state deletes a session on SessionEnd and sends an end for each
+      // agent, main last, with `result` = the hook's `reason`; Stop sends the
+      // same end for main, never with a result. So a result means the session
+      // is gone. Without a reason the two look the same and the session stays
+      // here until the next picture leaves it out (a known gap in the
+      // office format, not guessed at here).
       else if (event.result !== undefined) session.closing = true;
     } else {
       c.lingerMs = null;
@@ -220,6 +240,7 @@ export class OfficeModel {
   /** Advances the scene by `dt` ms. */
   step(dt: number): void {
     const ms = Math.max(0, dt);
+    this.time += ms;
     let placesChanged = false;
     let removed = false;
     for (const session of this.sessions) {
@@ -247,18 +268,34 @@ export class OfficeModel {
     if (placesChanged || removed) this.retarget(false);
   }
 
-  /** Whether anything moves: when false, frames can stop until the next change. */
+  /** Whether anything will change on screen without a new event. */
   busy(): boolean {
+    return this.nextChangeIn() < Number.POSITIVE_INFINITY;
+  }
+
+  /**
+   * In how many ms the picture changes next without a new event: 0 while
+   * someone walks, a cue plays or a bubble pops in; otherwise the next typing
+   * or thinking frame, the end of a linger or of a bubble; `Infinity` when
+   * the office is still. The frame loop sleeps until then, so a character
+   * waiting for hours costs 2.5 frames a second, not 30.
+   */
+  nextChangeIn(): number {
+    let next = Number.POSITIVE_INFINITY;
+    const until = (period: number) => period - (this.time % period);
     for (const session of this.sessions) {
       for (const c of session.agents) {
-        if (c.path.length > 0 || c.lingerMs !== null || c.cue !== null) return true;
+        if (c.path.length > 0 || c.cue !== null || (c.bubble && c.bubbleAge < POP_MS)) return 0;
+        if (c.lingerMs !== null) next = Math.min(next, c.lingerMs);
         // A bubble still has to go away.
-        if (c.bubble && bubbleVisible(c) && !sticky(c.bubble)) return true;
-        // Typing and thinking at the desk are animated too.
-        if (c.place === "desk" && c.activity !== "idle") return true;
+        if (c.bubble && bubbleVisible(c) && !sticky(c.bubble)) next = Math.min(next, BUBBLE_MS - c.bubbleAge);
+        if (c.place === "desk") {
+          if (c.activity === "working") next = Math.min(next, until(TYPE_FRAME_MS));
+          if (c.activity === "waiting") next = Math.min(next, until(THINK_FRAME_MS));
+        }
       }
     }
-    return false;
+    return Math.max(0, next);
   }
 
   /** Characters in drawing order (top to bottom, so nearer ones cover farther ones). */
@@ -286,6 +323,10 @@ export class OfficeModel {
           walking: c.path.length > 0,
           facing: c.facing,
           history: c.history,
+          seated: c.place === "desk" && c.path.length === 0,
+          stepFrame: c.path.length > 0 ? Math.floor(this.time / STEP_FRAME_MS) % 2 : 0,
+          typeFrame: c.place === "desk" && c.path.length === 0 && c.activity === "working" ? Math.floor(this.time / TYPE_FRAME_MS) % 2 : 0,
+          dots: c.place === "desk" && c.path.length === 0 && c.activity === "waiting" ? Math.floor(this.time / THINK_FRAME_MS) % 4 : 0,
         });
       }
     }

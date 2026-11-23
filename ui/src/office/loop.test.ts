@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { FakeClock } from "./fake-clock.test-util";
 import { FrameLoop, MAX_FPS, MAX_STEP_MS } from "./loop";
 
-function setup(more: () => boolean = () => true) {
+function setup(next: () => number = () => 0) {
   const clock = new FakeClock();
   const steps: number[] = [];
   const loop = new FrameLoop((dt) => {
     steps.push(dt);
-    return more();
+    return next();
   }, clock);
   return { clock, steps, loop };
 }
@@ -32,17 +32,44 @@ describe("FrameLoop", () => {
     for (const dt of steps.slice(1)) expect(dt).toBeGreaterThanOrEqual(1000 / MAX_FPS - 2);
   });
 
-  it("stops asking for frames when nothing moves", () => {
+  it("stops asking for frames when nothing will change", () => {
     let frames = 3;
-    const { clock, steps, loop } = setup(() => --frames > 0);
+    const { clock, steps, loop } = setup(() => (--frames > 0 ? 0 : Number.POSITIVE_INFINITY));
     loop.wake();
     clock.run(20);
     expect(steps).toHaveLength(3);
     expect(loop.running).toBe(false);
+    expect(loop.sleeping).toBe(false);
     expect(clock.pending).toBe(0);
   });
 
-  it("setVisible(false) cancels the pending frame and asks for none", () => {
+  it("sleeps on a timer until a change far ahead, with no frames meanwhile", () => {
+    const { clock, steps, loop } = setup(() => 400);
+    loop.wake();
+    clock.tick();
+    expect(loop.running).toBe(false);
+    expect(loop.sleeping).toBe(true);
+    const requests = clock.requests;
+    // One minute at 60 Hz: one frame every 400 ms, not 30 a second.
+    clock.run(3600);
+    expect(steps.length).toBeGreaterThanOrEqual(140);
+    expect(steps.length).toBeLessThanOrEqual(155);
+    expect(clock.requests - requests).toBeLessThanOrEqual(155);
+    // The step after a sleep covers the sleep, so animations keep their pace.
+    for (const dt of steps.slice(1)) expect(dt).toBeGreaterThanOrEqual(400);
+  });
+
+  it("a change during a sleep is drawn at once", () => {
+    const { clock, steps, loop } = setup(() => 5000);
+    loop.wake();
+    clock.tick();
+    loop.wake();
+    expect(loop.sleeping).toBe(false);
+    clock.tick();
+    expect(steps).toHaveLength(2);
+  });
+
+  it("setVisible(false) cancels the pending frame and timer and asks for none", () => {
     const { clock, steps, loop } = setup();
     loop.wake();
     clock.run(5);
@@ -57,6 +84,14 @@ describe("FrameLoop", () => {
     clock.run(30);
     expect(clock.requests).toBe(before);
     expect(steps).toHaveLength(drawn);
+
+    const sleepy = setup(() => 1000);
+    sleepy.loop.wake();
+    sleepy.clock.tick();
+    expect(sleepy.clock.pendingTimers).toBe(1);
+    sleepy.loop.setVisible(false);
+    expect(sleepy.clock.pendingTimers).toBe(0);
+    expect(sleepy.clock.pending).toBe(0);
   });
 
   it("starts again when shown, without counting the hidden time", () => {

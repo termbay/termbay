@@ -58,14 +58,25 @@ export interface EventEffect {
 const CSI = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]?/g;
 const STRING_SEQ = /(?:\u001b[\]PX^_]|[\u0090\u0098\u009d\u009e\u009f])[^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)?/g;
 const TWO_BYTE = /\u001b[\s\S]?/g;
-// Remaining C0 and C1 controls, DEL, and invisible format characters that can
-// hide or reorder text (zero-width, bidi embeddings, overrides and isolates,
-// byte order mark).
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+// Remaining C0 and C1 controls, DEL, and the line and paragraph separators:
+// each becomes a space.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+// Invisible characters that can hide, fake or reorder text: soft hyphen,
+// Arabic letter mark, Hangul fillers, zero-width space and non-joiner, LRM
+// and RLM, bidi embeddings, overrides and isolates, word joiner and invisible
+// operators, byte order mark, interlinear annotation and the tag block. They
+// are dropped. The zero-width joiner (U+200D) stays: emoji sequences such as
+// families need it.
+const INVISIBLE =
+  /[\u00ad\u061c\u115f\u3164\u200b\u200c\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
+/** Combining marks kept after one character; more is "Zalgo" text. */
+export const MAX_COMBINING = 2;
+const ZALGO = new RegExp(`(\\p{M}{${MAX_COMBINING}})\\p{M}+`, "gu");
 
 /**
  * Bubble-safe text: removes terminal control sequences and control or
- * invisible characters, collapses whitespace, trims, and cuts to `max`
+ * invisible characters, keeps at most MAX_COMBINING combining marks in a
+ * row, collapses whitespace, trims, and cuts to `max`
  * characters (code points, never half of a pair), ending with `…` when cut.
  */
 export function cleanText(text: string | undefined | null, max = BUBBLE_MAX_CHARS): string {
@@ -75,6 +86,8 @@ export function cleanText(text: string | undefined | null, max = BUBBLE_MAX_CHAR
     .replace(CSI, " ")
     .replace(TWO_BYTE, " ")
     .replace(CONTROL, " ")
+    .replace(INVISIBLE, "")
+    .replace(ZALGO, "$1")
     .replace(/\s+/g, " ")
     .trim();
   const chars = Array.from(plain);

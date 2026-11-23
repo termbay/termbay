@@ -5,7 +5,7 @@
 import type { OfficeEvent, OfficeListener, OfficeSnapshot } from "../transport/office";
 import type { OfficeLayout, Size } from "./layout";
 import { FrameLoop, type FrameClock } from "./loop";
-import { OfficeModel, type CharacterView } from "./model";
+import { OfficeModel, POP_MS, type CharacterView } from "./model";
 
 /** The office scene, as the panel uses it. `snapshot` and `event` make it an OfficeListener. */
 export interface OfficeScene extends OfficeListener {
@@ -49,17 +49,57 @@ export interface OfficeSceneHandle extends OfficeScene {
   readonly loop: FrameLoop;
 }
 
+/**
+ * Everything a frame shows, as a string: two frames with the same key look
+ * the same, so the second is not drawn. Positions are rounded to pixels, as
+ * the renderer draws them.
+ */
+export function frameKey(frame: SceneFrame): string {
+  const { layout } = frame;
+  return JSON.stringify([
+    layout.size,
+    layout.scale,
+    layout.desks,
+    frame.characters.map((c) => [
+      c.key,
+      c.label,
+      c.color,
+      c.main,
+      Math.round(c.x),
+      Math.round(c.y),
+      c.place,
+      c.facing,
+      c.seated,
+      c.stepFrame,
+      c.typeFrame,
+      c.dots,
+      c.bubbleVisible ? [c.bubble?.mark, c.bubble?.text, c.bubbleAge < POP_MS ? Math.floor(c.bubbleAge / 16) : -1] : null,
+      c.cue ? [c.cue, Math.round(c.cueProgress * 30)] : null,
+    ]),
+  ]);
+}
+
 export function createOfficeScene(renderer: SceneRenderer, host: SceneHost): OfficeSceneHandle {
   const model = new OfficeModel(host.size);
   renderer.resize(host.size);
   let time = 0;
   let destroyed = false;
+  let drawn = "";
+  let force = true;
 
   const loop = new FrameLoop((dt) => {
     time += dt;
     model.step(dt);
-    renderer.draw({ layout: model.layout, characters: model.characters(), time });
-    return model.busy();
+    const frame: SceneFrame = { layout: model.layout, characters: model.characters(), time };
+    // Draw only when something on screen changed (or the canvas was resized
+    // or shown again).
+    const key = frameKey(frame);
+    if (force || key !== drawn) {
+      renderer.draw(frame);
+      drawn = key;
+      force = false;
+    }
+    return model.nextChangeIn();
   }, host.clock);
 
   const stops: (() => void)[] = [];
@@ -70,6 +110,7 @@ export function createOfficeScene(renderer: SceneRenderer, host: SceneHost): Off
         if (destroyed || size.width <= 0 || size.height <= 0) return;
         renderer.resize(size);
         model.resize(size);
+        force = true;
         loop.wake();
       }),
     );
@@ -92,7 +133,9 @@ export function createOfficeScene(renderer: SceneRenderer, host: SceneHost): Off
       loop.wake();
     },
     setVisible(visible) {
-      if (!destroyed) loop.setVisible(visible);
+      if (destroyed) return;
+      if (visible) force = true;
+      loop.setVisible(visible);
     },
     destroy() {
       if (destroyed) return;

@@ -4,6 +4,7 @@ import type { OfficeEvent, OfficeKind } from "../transport/office";
 import {
   BUBBLE_GLYPHS,
   BUBBLE_MAX_CHARS,
+  MAX_COMBINING,
   EVENT_TABLE,
   cleanText,
   displayName,
@@ -40,8 +41,56 @@ describe("cleanText", () => {
     expect(cleanText("a\u0000b\u0007c\u007fd")).toBe("a b c d");
     expect(cleanText("a\u0085b")).toBe("a b");
     // Bidi override would show "txt.exe" as "exe.txt".
-    expect(cleanText("file\u202etxt.exe")).toBe("file txt.exe");
-    expect(cleanText("zero\u200bwidth\ufeff")).toBe("zero width");
+    expect(cleanText("file\u202etxt.exe")).toBe("filetxt.exe");
+    expect(cleanText("zero\u200bwidth\ufeff")).toBe("zerowidth");
+    expect(cleanText("a\u2028b\u2029c")).toBe("a b c");
+  });
+
+  it("drops tag characters, fillers and other invisible format characters", () => {
+    const invisible = [
+      "\u00ad", // soft hyphen
+      "\u061c", // Arabic letter mark
+      "\u115f", // Hangul choseong filler
+      "\u3164", // Hangul filler
+      "\u200b",
+      "\u200c",
+      "\u200e",
+      "\u200f",
+      "\u202a",
+      "\u2066",
+      "\u2069",
+      "\ufff9", // interlinear annotation
+      "\ufffa",
+      "\ufffb",
+      "\u{e0000}", // tag block, first
+      "\u{e0041}", // TAG LATIN CAPITAL LETTER A: hidden text
+      "\u{e007f}", // tag block, last
+    ];
+    for (const c of invisible) expect(cleanText(`ok${c}ok`), c.codePointAt(0)?.toString(16)).toBe("okok");
+    // A whole hidden message in tag characters disappears.
+    const hidden = Array.from("ignore", (ch) => String.fromCodePoint(0xe0000 + (ch.codePointAt(0) ?? 0))).join("");
+    expect(cleanText(`hi${hidden}`)).toBe("hi");
+    // Only invisible characters: nothing left.
+    expect(cleanText("\u3164\u115f\u00ad")).toBe("");
+  });
+
+  it("keeps the zero-width joiner, so emoji families stay whole", () => {
+    const family = "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}";
+    expect(cleanText(family)).toBe(family);
+    const keycap = "1\ufe0f\u20e3";
+    expect(cleanText(keycap)).toBe(keycap);
+  });
+
+  it("keeps at most MAX_COMBINING combining marks after a character", () => {
+    expect(MAX_COMBINING).toBe(2);
+    // Accents written as combining marks are kept.
+    expect(cleanText("cafe\u0301")).toBe("cafe\u0301");
+    expect(cleanText("a\u0301\u0308")).toBe("a\u0301\u0308");
+    // Zalgo: dozens of marks on each letter.
+    const zalgo = Array.from("zalgo", (ch) => ch + "\u0301\u0308\u0336\u0353\u0489".repeat(8)).join("");
+    const clean = cleanText(zalgo);
+    expect(clean).toBe(Array.from("zalgo", (ch) => `${ch}\u0301\u0308`).join(""));
+    expect(clean.replace(/\p{M}/gu, "")).toBe("zalgo");
   });
 
   it("cuts at 80 characters with an ellipsis", () => {
