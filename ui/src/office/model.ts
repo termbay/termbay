@@ -10,13 +10,16 @@
 // - a subagent that finished: lingers at the desk, then goes for coffee
 //   ("back to free" in docs/ARQUITETURA.md);
 // - the main agent stays at its desk between turns;
-// - when its session ends, or it is gone from a new picture: leaves by the door.
+// - when its session ends (session_end), when the core drops it (an end with
+//   result "evicted"), or when it is gone from a new picture: leaves by the door.
 
 import type { Activity, OfficeEvent, OfficeSnapshot } from "../transport/office";
 import { breakSpot, layoutOffice, route, type OfficeLayout, type Point, type Size } from "./layout";
 import { displayName, mapEvent, snapshotBubble, type Bubble, type Cue } from "./mapping";
 
 export const MAIN_AGENT = "main";
+/** `result` of the `end` of an agent the core dropped (core::state::EVICTED). */
+export const EVICTED = "evicted";
 /** Walking speed at full scale, in pixels per second. */
 export const WALK_SPEED = 90;
 /** How long a finished subagent stays at its desk before going for coffee. */
@@ -214,6 +217,16 @@ export class OfficeModel {
 
   /** One change: the character arrives if new, then does what the event says. */
   event(event: OfficeEvent): void {
+    // The session is gone from the core (closed by Claude Code or evicted):
+    // everyone walks out by the door, then the session is removed.
+    if (event.kind === "session_end") {
+      const gone = this.find(event.session);
+      if (gone) {
+        gone.closing = true;
+        this.retarget(false);
+      }
+      return;
+    }
     const session = this.find(event.session) ?? this.openSession(event.session);
     session.closing = false;
     if (event.pane) session.pane = event.pane;
@@ -242,14 +255,11 @@ export class OfficeModel {
     c.cue = effect.cue;
     c.cueMs = 0;
     if (event.kind === "end") {
-      if (c.id !== MAIN_AGENT) c.lingerMs = LINGER_MS;
-      // core::state deletes a session on SessionEnd and sends an end for each
-      // agent, main last, with `result` = the hook's `reason`; Stop sends the
-      // same end for main, never with a result. So a result means the session
-      // is gone. Without a reason the two look the same and the session stays
-      // here until the next picture leaves it out (a known gap in the
-      // office format, not guessed at here).
-      else if (event.result !== undefined) session.closing = true;
+      // The core dropped this subagent to make room: it leaves at once.
+      if (c.id !== MAIN_AGENT && event.result === EVICTED) c.leaving = true;
+      // A finished subagent lingers, then goes for coffee; the main agent
+      // (Stop, the end of a turn) stays at its desk.
+      else if (c.id !== MAIN_AGENT) c.lingerMs = LINGER_MS;
     } else {
       c.lingerMs = null;
     }

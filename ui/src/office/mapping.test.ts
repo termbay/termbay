@@ -118,7 +118,7 @@ describe("cleanText", () => {
 
 describe("mapEvent: the whole table", () => {
   it("has one row per kind", () => {
-    const kinds: OfficeKind[] = ["start", "tool", "message", "wait", "end", "error", "task"];
+    const kinds: OfficeKind[] = ["start", "tool", "message", "wait", "end", "error", "task", "session_end"];
     expect(Object.keys(EVENT_TABLE).sort()).toEqual([...kinds].sort());
   });
 
@@ -191,6 +191,14 @@ describe("mapEvent: the whole table", () => {
       cue: "note",
     });
     expect(mapEvent(event({ kind: "task", action: "completed" })).bubble?.text).toBe("task completed");
+  });
+
+  it("session_end: free, no bubble", () => {
+    expect(mapEvent(event({ agent: "main", kind: "session_end", result: "clear" }))).toEqual({
+      activity: "idle",
+      bubble: null,
+      cue: "rest",
+    });
   });
 
   it("an unknown kind (newer core) changes nothing", () => {

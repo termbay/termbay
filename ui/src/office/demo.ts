@@ -48,6 +48,7 @@ export const DEMO: readonly DemoStep[] = [
   { after: 4000, event: ev("a-bruno", { kind: "end", result: "other" }) },
   { after: 0, event: ev("a-ana", { kind: "end", result: "other" }) },
   { after: 0, event: ev("main", { kind: "end", result: "other" }) },
+  { after: 0, event: ev("main", { kind: "session_end", result: "other" }) },
 ];
 
 export interface DemoTimers {

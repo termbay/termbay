@@ -157,6 +157,8 @@ export const EVENT_TABLE = {
     bubble: bubble("task", join(": ", join(" ", "task", e.action), e.text)),
     cue: "note",
   }),
+  // The whole session is gone: free, no bubble; the scene walks everyone out.
+  session_end: () => ({ activity: "idle", bubble: null, cue: "rest" }),
 } as const satisfies Record<OfficeKind, Mapper>;
 
 /** What `event` does to its character. Unknown kinds change nothing. */
