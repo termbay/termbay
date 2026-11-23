@@ -46,11 +46,7 @@ describe("checkRelease", () => {
       "assets/render-e.js": RENDER,
     });
     expect(checkRelease(root)).toEqual([]);
-    expect(
-      initialFiles(root)
-        .map((p) => p.slice(root.length + 1))
-        .sort(),
-    ).toEqual(["assets/index-a.js", "assets/shared-b.js", "assets/side-c.js"]);
+    expect(initialFiles(root).sort()).toEqual(["assets/index-a.js", "assets/shared-b.js", "assets/side-c.js"]);
   });
 
   it("fails when PixiJS is in the entry, a static import or a modulepreload", () => {
