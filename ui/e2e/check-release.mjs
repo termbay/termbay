@@ -9,7 +9,7 @@
 //   reached through import() when the panel opens (decision E8), so their
 //   lazy chunks may contain it.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Must not be in any file of the build. */
@@ -23,6 +23,9 @@ export const MARKERS = [
 export const FORBIDDEN_FILES = [/^office-demo/];
 /** PixiJS's own name, as its code spells it ("pixi.js", "PixiJS"). */
 export const PIXI = /pixi\.?js/i;
+
+/** `path` relative to `root`, with "/" on every system (for messages and tests). */
+const rel = (root, path) => relative(root, path).split(sep).join("/");
 
 const walk = (dir, out = []) => {
   for (const name of readdirSync(dir)) {
@@ -38,7 +41,7 @@ const walk = (dir, out = []) => {
 const STATIC_IMPORT = /(?:^|[^\w$.])(?:import|export)\s*(?:[\w$*{}\s,]+?\s*from\s*)?["']([^"']+)["']/g;
 const HTML_ENTRY = /<(?:script[^>]*\bsrc|link[^>]*\brel=["']?modulepreload["']?[^>]*\bhref)=["']([^"']+)["']/gi;
 
-/** Files index.html loads before anything is opened. */
+/** Files index.html loads before anything is opened, relative to `root`, with "/". */
 export function initialFiles(root) {
   const html = join(root, "index.html");
   if (!existsSync(html)) return [];
@@ -56,20 +59,20 @@ export function initialFiles(root) {
       if (spec.startsWith(".") || spec.startsWith("/")) queue.push(resolve(dirname(file), spec));
     }
   }
-  return [...seen];
+  return [...seen].map((file) => rel(root, file));
 }
 
 /** Every problem found in `root`, as readable lines; empty when the build is fine. */
 export function checkRelease(root) {
   const hits = [];
   for (const path of walk(root)) {
-    const name = relative(root, path);
+    const name = rel(root, path);
     if (FORBIDDEN_FILES.some((re) => re.test(basename(path)))) hits.push(`${name} (dev-only file)`);
     const content = readFileSync(path);
     for (const marker of MARKERS) if (content.includes(marker)) hits.push(`${name} (${marker})`);
   }
-  for (const path of initialFiles(root)) {
-    if (PIXI.test(readFileSync(path, "utf8"))) hits.push(`${relative(root, path)} (PixiJS in the initial bundle)`);
+  for (const name of initialFiles(root)) {
+    if (PIXI.test(readFileSync(join(root, name), "utf8"))) hits.push(`${name} (PixiJS in the initial bundle)`);
   }
   return hits;
 }
