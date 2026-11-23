@@ -74,7 +74,7 @@ const pixi = vi.hoisted(() => {
       this.style = { ...options.style };
     }
   }
-  const state = { failInit: false, apps: [] as Application[] };
+  const state = { failInit: false, failWebgl: false, unsafeEval: false, apps: [] as Application[] };
   class Application {
     initOptions: Record<string, unknown> = {};
     canvas = document.createElement("canvas");
@@ -89,6 +89,8 @@ const pixi = vi.hoisted(() => {
     async init(options: Record<string, unknown>) {
       this.initOptions = options;
       if (state.failInit) throw new Error("no WebGL");
+      // WebGL reported but failing to start: only the explicit Canvas 2D try works.
+      if (state.failWebgl && options.preference !== "canvas") throw new Error("WebGL context failed");
     }
   }
   const Ticker = { system: { autoStart: true, stop: vi.fn(), update: vi.fn() } };
@@ -96,6 +98,10 @@ const pixi = vi.hoisted(() => {
 });
 
 vi.mock("pixi.js", () => pixi);
+vi.mock("pixi.js/unsafe-eval", () => {
+  pixi.state.unsafeEval = true;
+  return {};
+});
 
 import type { SceneFrame } from "./controller";
 import { OfficeModel } from "./model";
@@ -125,6 +131,7 @@ function all(app: InstanceType<typeof pixi.Application>) {
 
 beforeEach(() => {
   pixi.state.failInit = false;
+  pixi.state.failWebgl = false;
   pixi.state.apps.length = 0;
   pixi.Ticker.system.autoStart = true;
   vi.clearAllMocks();
@@ -142,6 +149,27 @@ describe("PixiRenderer", () => {
     expect(pixi.Ticker.system.autoStart).toBe(false);
     expect(pixi.Ticker.system.stop).toHaveBeenCalled();
     renderer.destroy();
+  });
+
+  it("loads PixiJS's eval-free code, as the app's CSP has no unsafe-eval", () => {
+    // Imported by render.ts at load time; without it no renderer starts in the app.
+    expect(pixi.state.unsafeEval).toBe(true);
+  });
+
+  it("tries WebGL, then Canvas 2D when WebGL is reported but fails to start", async () => {
+    pixi.state.failWebgl = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const container = document.createElement("div");
+    const renderer = await PixiRenderer.create(container, SIZE);
+    const [webgl, canvas] = pixi.state.apps;
+    expect(webgl?.initOptions.preference).toEqual(["webgl", "canvas"]);
+    expect(webgl?.destroy).toHaveBeenCalledWith({ removeView: true });
+    expect(canvas?.initOptions.preference).toBe("canvas");
+    expect(container.querySelector("canvas")).toBe(canvas?.canvas);
+    expect(warn).toHaveBeenCalled();
+    renderer.destroy();
+    expect(pixi.Ticker.system.autoStart).toBe(true);
+    warn.mockRestore();
   });
 
   it("draws by hand, advancing PixiJS's ticker only inside our frames", async () => {
