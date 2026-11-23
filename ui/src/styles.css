@@ -280,6 +280,14 @@ body {
   overflow: hidden;
 }
 
+/* The office scene's canvas (task C2): sized by the scene to fill its box. */
+.office-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
 /* Debug list of office events (e2e builds only, task B1). */
 .office-debug {
   margin: 0;

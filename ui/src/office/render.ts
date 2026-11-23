@@ -339,7 +339,8 @@ export class PixiRenderer implements SceneRenderer {
       autoDensity: true,
       autoStart: false,
       sharedTicker: false,
-      preference: "webgl",
+      // WebGL first; Canvas 2D where WebGL is missing (plan B of decision E8).
+      preference: ["webgl", "canvas"],
       eventFeatures: { move: false, globalMove: false, click: true, wheel: false },
       });
     } catch (error) {

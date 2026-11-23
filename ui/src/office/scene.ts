@@ -8,8 +8,10 @@
 //   await subscribeOffice(tauriOfficeIpc, scene);
 //   scene.setVisible(false); // panel hidden: no frames at all
 
-import { createOfficeScene, type OfficeScene, type SceneHost } from "./controller";
+import type { OfficeContent } from "./content";
+import { createOfficeScene, type OfficeSceneHandle, type SceneHost } from "./controller";
 import type { Size } from "./layout";
+import { createPlaceholder } from "./placeholder";
 
 export type { OfficeScene } from "./controller";
 
@@ -67,11 +69,26 @@ export function browserHost(container: HTMLElement, win: HostWindow = window): S
 /**
  * Mounts the office inside `container` (a canvas that fills it) and returns
  * the scene. `snapshot` and `event` can be given to subscribeOffice as is.
- * Rejects when the canvas cannot be created (no WebGL).
+ * Rejects when the canvas cannot be created (neither WebGL nor Canvas 2D).
  */
-export async function mountOfficeScene(container: HTMLElement): Promise<OfficeScene> {
+export async function mountOfficeScene(container: HTMLElement): Promise<OfficeSceneHandle> {
   const host = browserHost(container);
   const { PixiRenderer } = await import("./render");
   const renderer = await PixiRenderer.create(container, host.size);
+  container.classList.add("office-scene");
   return createOfficeScene(renderer, host);
+}
+
+/**
+ * The office panel's content (an OfficeContentLoader): the scene, or an
+ * empty panel when the canvas cannot be created, so the terminal never
+ * breaks because of the office.
+ */
+export async function loadOfficeContent(host: HTMLElement): Promise<OfficeContent> {
+  try {
+    return await mountOfficeScene(host);
+  } catch (error) {
+    console.error("[termbay] could not draw the office", error);
+    return createPlaceholder(host);
+  }
 }

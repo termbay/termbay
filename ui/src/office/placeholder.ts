@@ -1,5 +1,5 @@
-// Office content of release builds until the scene exists (task C2): an
-// empty panel. Loaded with import() on the first opening, like the scene.
+// An empty office panel: what release builds show when the scene cannot
+// draw (no WebGL nor Canvas 2D), so the office never breaks the terminal.
 
 import type { OfficeContent } from "./content";
 
