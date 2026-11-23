@@ -105,14 +105,15 @@ function startOffice(inTauri: boolean, autoOpen: boolean, focusTerminal: () => v
 }
 
 /**
- * What the panel shows. Builds with VITE_OFFICE_DEBUG=1 (the e2e build)
- * show the debug list of tasks B1 and D3; release builds an empty panel
- * until the scene exists (task C2). Each behind import(), so release builds
- * do not contain the debug list (e2e/check-release.mjs makes sure).
+ * What the panel shows: the office scene (task C2), loaded with import()
+ * on the first opening, with PixiJS behind a second import() (decision E8).
+ * Builds with VITE_OFFICE_DEBUG=1 (the e2e build) show the scene and the
+ * debug list of tasks B1 and D3 together, with a probe for the e2e specs;
+ * release builds never contain them (e2e/check-release.mjs makes sure).
  */
 const officeContent: OfficeContentLoader =
   import.meta.env.VITE_OFFICE_DEBUG === "1"
-    ? async (host) => new (await import("./office/debug")).OfficeDebugList(host)
-    : async (host) => (await import("./office/placeholder")).createPlaceholder(host);
+    ? async (host) => (await import("./office/e2e-content")).createE2EContent(host)
+    : async (host) => (await import("./office/scene")).loadOfficeContent(host);
 
 main().catch((error: unknown) => console.error("[termbay] failed to start", error));
