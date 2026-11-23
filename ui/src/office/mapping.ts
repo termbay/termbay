@@ -161,6 +161,10 @@ export function snapshotBubble(agent: AgentView): Bubble | null {
 }
 
 /** The name shown under a character. */
-export function displayName(agent: { readonly id: string; readonly name?: string; readonly role?: string }): string {
+export function displayName(agent: {
+  readonly id: string;
+  readonly name?: string | undefined;
+  readonly role?: string | undefined;
+}): string {
   return cleanText(agent.name ?? (agent.id === "main" ? "main" : (agent.role ?? "agent")), 24);
 }
