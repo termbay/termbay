@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { OfficeEvent, OfficeIpc, OfficeSnapshot } from "../transport/office";
 import { createOfficeScene, type OfficeSceneHandle, type SceneRenderer } from "./controller";
@@ -57,6 +57,8 @@ describe("createE2EContent", () => {
   });
 
   it("keeps the debug list when the scene cannot be drawn", async () => {
+    // The failure is logged on purpose; keep the test output clean.
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const host = document.createElement("div");
     const target: { __termbayOffice?: OfficeProbe } = {};
     const content = await createE2EContent(host, {
@@ -70,6 +72,8 @@ describe("createE2EContent", () => {
     expect(target.__termbayOffice?.scene()).toBeNull();
     content.setVisible(false);
     content.destroy();
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });
 

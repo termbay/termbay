@@ -12,6 +12,11 @@
 // passer-by in front covers the desk), names, then bubbles.
 
 import { Application, BitmapText, Container, Graphics, Ticker } from "pixi.js";
+// The app's Content-Security-Policy has no 'unsafe-eval' (tauri.conf.json),
+// and PixiJS builds shader and uniform code with new Function unless this
+// module swaps in its eval-free versions. Without it, every renderer fails
+// to start in the app ("does not allow unsafe-eval").
+import "pixi.js/unsafe-eval";
 
 import type { SceneFrame, SceneRenderer } from "./controller";
 import { DESK_FRONT, SEAT_OFFSET, type OfficeLayout, type Point, type Size } from "./layout";
@@ -308,6 +313,38 @@ function releaseSystemTicker(): void {
   if (--tickerHolds === 0) Ticker.system.autoStart = previousAutoStart;
 }
 
+/** A stopped PixiJS application with `preference`; cleaned up if it fails. */
+async function startApplication(size: Size, preference: "canvas" | ("webgl" | "canvas")[]): Promise<Application> {
+  const app = new Application();
+  try {
+    await app.init({
+      width: Math.max(1, size.width),
+      height: Math.max(1, size.height),
+      background: COLORS.background,
+      antialias: false,
+      roundPixels: true,
+      resolution: globalThis.devicePixelRatio || 1,
+      autoDensity: true,
+      autoStart: false,
+      sharedTicker: false,
+      preference,
+      eventFeatures: { move: false, globalMove: false, click: true, wheel: false },
+    });
+    return app;
+  } catch (error) {
+    // Whatever init created (a context, listeners) goes too; a failure
+    // while cleaning up must not hide the first error.
+    try {
+      // Only when init got as far as a renderer; before that there is
+      // nothing to free and destroy() itself throws.
+      if (app.renderer) app.destroy({ removeView: true });
+    } catch (cleanup) {
+      console.error("[termbay] could not clean up the office canvas", cleanup);
+    }
+    throw error;
+  }
+}
+
 export class PixiRenderer implements SceneRenderer {
   private readonly room = new Graphics();
   /** Characters and desks, sorted by depth (zIndex = y). */
@@ -327,30 +364,19 @@ export class PixiRenderer implements SceneRenderer {
   /** Creates the canvas inside `container`. Rejects if WebGL is not available. */
   static async create(container: HTMLElement, size: Size): Promise<PixiRenderer> {
     holdSystemTicker();
-    const app = new Application();
+    let app: Application;
     try {
-      await app.init({
-      width: Math.max(1, size.width),
-      height: Math.max(1, size.height),
-      background: COLORS.background,
-      antialias: false,
-      roundPixels: true,
-      resolution: globalThis.devicePixelRatio || 1,
-      autoDensity: true,
-      autoStart: false,
-      sharedTicker: false,
-      // WebGL first; Canvas 2D where WebGL is missing (plan B of decision E8).
-      preference: ["webgl", "canvas"],
-      eventFeatures: { move: false, globalMove: false, click: true, wheel: false },
-      });
-    } catch (error) {
-      // Whatever init created (a context, listeners) goes too; a failure
-      // while cleaning up must not hide the first error.
+      // WebGL first, Canvas 2D where WebGL is missing (plan B of decision
+      // E8). PixiJS only falls back when WebGL is reported missing; a WebGL
+      // that is reported but fails to start (software GL, no GPU) throws,
+      // so Canvas 2D gets a second, explicit try.
       try {
-        app.destroy({ removeView: true });
-      } catch (cleanup) {
-        console.error("[termbay] could not clean up the office canvas", cleanup);
+        app = await startApplication(size, ["webgl", "canvas"]);
+      } catch (error) {
+        console.warn("[termbay] office: WebGL did not start, drawing with Canvas 2D", error);
+        app = await startApplication(size, "canvas");
       }
+    } catch (error) {
       releaseSystemTicker();
       throw error;
     }

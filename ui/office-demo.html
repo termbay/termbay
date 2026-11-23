@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>termbay office demo</title>
     <!-- Dev only (npm run dev, then /office-demo.html): not part of the build. -->
+    <!-- The app's CSP (app/src-tauri/tauri.conf.json), so the demo fails where the app would
+         (no 'unsafe-eval'); connect-src only adds Vite's reload socket. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5173; object-src 'none'; base-uri 'none'"
+    />
     <style>
       html, body { margin: 0; height: 100%; background: #111318; color: #c8ccd4; font: 12px monospace; }
       body { display: flex; gap: 12px; padding: 12px; box-sizing: border-box; }
