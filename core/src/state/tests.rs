@@ -524,6 +524,45 @@ fn sessions_are_kept_apart_and_bounded() {
 }
 
 #[test]
+fn evicting_an_agent_sends_it_home() {
+    let mut office = Office::new();
+    office.apply(&ev(json!({"event": "SessionStart"})));
+    for n in 1..MAX_AGENTS {
+        let out = office.apply(&ev(
+            json!({"event": "SubagentStart", "agent_id": format!("a{n}"), "agent_type": "qa"}),
+        ));
+        assert_eq!(kinds(&out), [(format!("a{n}"), Kind::Start)]);
+    }
+    // a1 is the subagent idle the longest; the main agent is never evicted.
+    let out = office.apply(&ev(
+        json!({"event": "PreToolUse", "agent_id": "late", "agent_type": "qa", "tool": "Read", "file": "x"}),
+    ));
+    assert_eq!(
+        kinds(&out),
+        [
+            ("a1".into(), Kind::End),
+            ("late".into(), Kind::Start),
+            ("late".into(), Kind::Tool),
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&out[0]).unwrap(),
+        json!({"v": 1, "session": "s1", "pane": "3", "agent": "a1", "kind": "end", "result": EVICTED})
+    );
+
+    let out = office.apply(&ev(
+        json!({"event": "SubagentStart", "agent_id": "another", "agent_type": "qa"}),
+    ));
+    assert_eq!(
+        kinds(&out),
+        [("a2".into(), Kind::End), ("another".into(), Kind::Start)]
+    );
+    let agents = &office.snapshot().sessions[0].agents;
+    assert_eq!(agents.len(), MAX_AGENTS);
+    assert!(agents.iter().all(|a| a.id != "a1" && a.id != "a2"));
+}
+
+#[test]
 fn snapshot_and_events_serialize_in_the_e4_format() {
     let mut office = Office::new();
     let out = run(
