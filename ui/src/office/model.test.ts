@@ -117,21 +117,6 @@ describe("OfficeModel: working, waiting, free", () => {
     expect(model.busy()).toBe(false);
   });
 
-  it("when the session ends, everyone leaves by the door and the session goes", () => {
-    const model = new OfficeModel(SIZE);
-    model.event(ev("main", { kind: "start" }));
-    model.event(ev("a1", { kind: "start" }));
-    run(model, 10_000);
-    // core::state on SessionEnd: an end for each agent, main last, with the reason.
-    model.event(ev("a1", { kind: "end", result: "other" }));
-    model.event(ev("main", { kind: "end", result: "other" }));
-    expect(who(model, "main").place).toBe("out");
-    expect(who(model, "a1").place).toBe("out");
-    expect(model.agents()).toEqual([]);
-    run(model, 20_000);
-    expect(model.characters()).toEqual([]);
-    expect(model.busy()).toBe(false);
-  });
 });
 
 describe("OfficeModel: pictures", () => {
@@ -294,20 +279,74 @@ describe("OfficeModel: when the picture changes next", () => {
 });
 
 describe("OfficeModel: the end of a session, as core::state signals it", () => {
-  // core::state on SessionEnd removes the session and sends an end for each
-  // agent, main last, with `result` = the hook's `reason`. Stop sends the
-  // same end for main, never with a result. Without a reason the two cannot
-  // be told apart, so the scene keeps the session: main idle at its desk.
-  it("without a reason, the main agent's end looks like Stop: the session stays", () => {
+  it("session_end walks everyone out by the door, then the session goes", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    model.event(ev("a1", { kind: "start" }));
+    run(model, 10_000);
+    // core::state when a session goes: an end for each agent (last arrived
+    // first), then session_end, all with Claude Code's reason.
+    model.event(ev("a1", { kind: "end", result: "clear" }));
+    model.event(ev("main", { kind: "end", result: "clear" }));
+    expect(who(model, "main").place).toBe("desk");
+    model.event(ev("main", { kind: "session_end", result: "clear" }));
+    expect(who(model, "main").place).toBe("out");
+    expect(who(model, "a1").place).toBe("out");
+    expect(model.agents()).toEqual([]);
+    run(model, 20_000);
+    expect(model.characters()).toEqual([]);
+    expect(model.busy()).toBe(false);
+  });
+
+  it("an evicted session (result evicted) leaves the same way", () => {
+    const model = new OfficeModel(SIZE);
+    model.snapshot(snap([{ session: "s1", agents: [{ id: "main", activity: "idle" }], tasks: [] }]));
+    model.event(ev("main", { kind: "end", result: "evicted" }));
+    model.event(ev("main", { kind: "session_end", result: "evicted" }));
+    run(model, 20_000);
+    expect(model.characters()).toEqual([]);
+  });
+
+  it("session_end of a session the scene never saw changes nothing", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "session_end", session: "other" }));
+    expect(model.characters()).toEqual([]);
+    expect(model.agents()).toEqual([]);
+  });
+
+  it("a subagent the core evicted leaves at once; the others stay", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    model.event(ev("a1", { kind: "start" }));
+    model.event(ev("a2", { kind: "start" }));
+    run(model, 10_000);
+    model.event(ev("a1", { kind: "end", result: "evicted" }));
+    expect(who(model, "a1").place).toBe("out");
+    expect(model.agents()[0]?.agents.map((a) => a.id)).toEqual(["main", "a2"]);
+    run(model, 20_000);
+    expect(model.characters().map((c) => c.id).sort()).toEqual(["a2", "main"]);
+    expect(who(model, "main").place).toBe("desk");
+  });
+
+  it("Stop (an end for main, no result) keeps the main agent at its desk", () => {
     const model = new OfficeModel(SIZE);
     model.event(ev("main", { kind: "start" }));
     model.event(ev("main", { kind: "end" }));
     run(model, 20_000);
     expect(model.agents().map((s) => s.session)).toEqual(["s1"]);
     expect(who(model, "main").place).toBe("desk");
+    expect(who(model, "main").activity).toBe("idle");
   });
 
-  it("a new picture without the session closes it, reason or not", () => {
+  it("an end for main with a result is not the end of the session", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    model.event(ev("main", { kind: "end", result: "other" }));
+    run(model, 20_000);
+    expect(who(model, "main").place).toBe("desk");
+  });
+
+  it("a new picture without the session closes it too", () => {
     const model = new OfficeModel(SIZE);
     model.event(ev("main", { kind: "start" }));
     model.event(ev("main", { kind: "end" }));

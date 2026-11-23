@@ -51,7 +51,7 @@ describe("playDemo", () => {
   it("the recorded demo uses the office format only", () => {
     for (const step of DEMO) {
       expect(step.event.v).toBe(1);
-      expect(["start", "tool", "message", "wait", "end", "error", "task"]).toContain(step.event.kind);
+      expect(["start", "tool", "message", "wait", "end", "error", "task", "session_end"]).toContain(step.event.kind);
     }
   });
 });
