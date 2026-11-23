@@ -397,11 +397,99 @@ fn session_end_sends_everyone_home() {
     let out = office.apply(&ev(json!({"event": "SessionEnd", "reason": "exit"})));
     assert_eq!(
         kinds(&out),
-        [("a1".into(), Kind::End), ("main".into(), Kind::End)]
+        [
+            ("a1".into(), Kind::End),
+            ("main".into(), Kind::End),
+            ("main".into(), Kind::SessionEnd),
+        ]
     );
     assert!(out.iter().all(|e| e.result.as_deref() == Some("exit")));
+    assert!(
+        out.iter()
+            .all(|e| e.session == "s1" && e.pane.as_deref() == Some("3"))
+    );
+    assert_eq!(
+        serde_json::to_value(&out[2]).unwrap(),
+        json!({"v": 1, "session": "s1", "pane": "3", "agent": "main", "kind": "session_end", "result": "exit"})
+    );
     assert!(office.snapshot().sessions.is_empty());
     assert!(office.apply(&ev(json!({"event": "SessionEnd"}))).is_empty());
+}
+
+#[test]
+fn session_end_without_reason_still_closes_the_session() {
+    let mut office = Office::new();
+    run(&mut office, &[json!({"event": "SessionStart"})]);
+    let out = office.apply(&ev(json!({"event": "SessionEnd"})));
+    assert_eq!(
+        kinds(&out),
+        [
+            ("main".into(), Kind::End),
+            ("main".into(), Kind::SessionEnd)
+        ]
+    );
+    assert!(out.iter().all(|e| e.result.is_none()));
+    assert_eq!(
+        serde_json::to_value(&out[1]).unwrap(),
+        json!({"v": 1, "session": "s1", "pane": "3", "agent": "main", "kind": "session_end"})
+    );
+    assert!(office.snapshot().sessions.is_empty());
+}
+
+#[test]
+fn stop_does_not_end_the_session() {
+    let mut office = Office::new();
+    let out = run(
+        &mut office,
+        &[json!({"event": "SessionStart"}), json!({"event": "Stop"})],
+    );
+    assert!(out.iter().all(|e| e.kind != Kind::SessionEnd));
+    assert_eq!(office.snapshot().sessions.len(), 1);
+}
+
+#[test]
+fn evicting_a_session_closes_it() {
+    let mut office = Office::new();
+    run(
+        &mut office,
+        &[
+            json!({"event": "SessionStart", "session": "s0", "pane": "0"}),
+            json!({"event": "SubagentStart", "session": "s0", "pane": "0", "agent_id": "a1", "agent_type": "qa"}),
+        ],
+    );
+    for n in 1..MAX_SESSIONS {
+        let out = office.apply(&ev(
+            json!({"event": "SessionStart", "session": format!("s{n}"), "pane": format!("{n}")}),
+        ));
+        assert!(out.iter().all(|e| e.kind != Kind::SessionEnd));
+    }
+    let out = office.apply(&ev(
+        json!({"event": "SessionStart", "session": "new", "pane": "9"}),
+    ));
+    assert_eq!(
+        out.iter()
+            .map(|e| (e.session.as_str(), e.agent.as_str(), e.kind))
+            .collect::<Vec<_>>(),
+        [
+            ("s0", "a1", Kind::End),
+            ("s0", "main", Kind::End),
+            ("s0", "main", Kind::SessionEnd),
+            ("new", "main", Kind::Start),
+        ],
+        "the evicted session closes before the new one starts"
+    );
+    assert_eq!(
+        serde_json::to_value(&out[2]).unwrap(),
+        json!({"v": 1, "session": "s0", "pane": "0", "agent": "main", "kind": "session_end", "result": EVICTED})
+    );
+    assert!(
+        out[..3]
+            .iter()
+            .all(|e| e.result.as_deref() == Some(EVICTED))
+    );
+    let snapshot = office.snapshot();
+    assert_eq!(snapshot.sessions.len(), MAX_SESSIONS);
+    assert!(snapshot.sessions.iter().all(|s| s.session != "s0"));
 }
 
 #[test]

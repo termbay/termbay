@@ -35,6 +35,9 @@ pub const OFFICE_EVENT_VERSION: u32 = 1;
 pub const MAIN_AGENT: &str = "main";
 /// Sessions kept at once; the one idle the longest goes first.
 pub const MAX_SESSIONS: usize = 16;
+/// `result` of the [`Kind::SessionEnd`] sent when a session is dropped to
+/// make room for a new one ([`MAX_SESSIONS`]).
+pub const EVICTED: &str = "evicted";
 /// Agents kept per session; the one idle the longest goes first.
 pub const MAX_AGENTS: usize = 64;
 /// `Agent` calls waiting for their subagent, per session.
@@ -61,6 +64,12 @@ pub enum Kind {
     Error,
     /// A task was created or completed.
     Task,
+    /// The session is gone and everyone in it left: `result` is Claude
+    /// Code's `reason` when it gave one, or [`EVICTED`]. Always the last
+    /// event of a session, with `agent` = [`MAIN_AGENT`], after an `End` for
+    /// each agent.
+    #[serde(rename = "session_end")]
+    SessionEnd,
 }
 
 /// One change in the office (decision E4).
@@ -234,16 +243,12 @@ impl Office {
         if e.event == "SessionEnd" {
             if let Some(session) = self.sessions.remove(&e.session) {
                 self.order.retain(|s| s != &e.session);
-                for agent in session.agents.iter().rev() {
-                    let mut ev = event(e, &session.pane, &agent.view.id, Kind::End);
-                    ev.result = e.reason.clone();
-                    out.push(ev);
-                }
+                out.extend(close(&e.session, &session, e.reason.as_deref()));
             }
             return out;
         }
 
-        let session = self.session(e, clock);
+        let session = self.session(e, clock, &mut out);
         let agent_id = e.agent_id.clone().unwrap_or_else(|| MAIN_AGENT.to_owned());
 
         match e.event.as_str() {
@@ -369,8 +374,14 @@ impl Office {
     }
 
     /// The session of `e`, created if needed (evicting the one idle the
-    /// longest when full). Its pane follows the latest event that has one.
-    fn session(&mut self, e: &ReducedEvent, clock: u64) -> &mut Session {
+    /// longest when full, whose closing events go to `out`). Its pane
+    /// follows the latest event that has one.
+    fn session(
+        &mut self,
+        e: &ReducedEvent,
+        clock: u64,
+        out: &mut Vec<OfficeEvent>,
+    ) -> &mut Session {
         if !self.sessions.contains_key(&e.session) {
             if self.sessions.len() == MAX_SESSIONS
                 && let Some(oldest) = self
@@ -378,9 +389,10 @@ impl Office {
                     .iter()
                     .min_by_key(|(_, s)| s.last_seen)
                     .map(|(k, _)| k.clone())
+                && let Some(evicted) = self.sessions.remove(&oldest)
             {
-                self.sessions.remove(&oldest);
                 self.order.retain(|s| s != &oldest);
+                out.extend(close(&oldest, &evicted, Some(EVICTED)));
             }
             self.sessions
                 .insert(e.session.clone(), Session::new(e.pane.clone()));
@@ -395,11 +407,33 @@ impl Office {
     }
 }
 
+/// The events for a session that was removed: an `End` for each agent (the
+/// last to arrive first), then the `SessionEnd`, all with `result`.
+fn close(id: &str, session: &Session, result: Option<&str>) -> Vec<OfficeEvent> {
+    session
+        .agents
+        .iter()
+        .rev()
+        .map(|a| (a.view.id.as_str(), Kind::End))
+        .chain([(MAIN_AGENT, Kind::SessionEnd)])
+        .map(|(agent, kind)| {
+            let mut ev = office_event(id, &session.pane, agent, kind);
+            ev.result = result.map(str::to_owned);
+            ev
+        })
+        .collect()
+}
+
 /// A new office event for agent `agent` of the session of `e`.
 fn event(e: &ReducedEvent, pane: &Option<String>, agent: &str, kind: Kind) -> OfficeEvent {
+    office_event(&e.session, pane, agent, kind)
+}
+
+/// A new office event for agent `agent` of session `session`.
+fn office_event(session: &str, pane: &Option<String>, agent: &str, kind: Kind) -> OfficeEvent {
     OfficeEvent {
         v: OFFICE_EVENT_VERSION,
-        session: e.session.clone(),
+        session: session.to_owned(),
         pane: pane.clone(),
         agent: agent.to_owned(),
         kind,
