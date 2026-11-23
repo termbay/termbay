@@ -99,6 +99,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 { "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "tool",    "action": "reading", "target": "api.ts" }
 { "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "message", "to": "Bruno", "text": "terminei a API" }
 { "v": 1, "session": "s1", "pane": "p3", "agent": "Ana", "kind": "end",     "result": "ok" }
+{ "v": 1, "session": "s1", "pane": "p3", "agent": "main", "kind": "session_end", "result": "clear" }
 ```
 
 As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2-PLANO.md)). Campos desconhecidos são ignorados, e a versão fica em `v`.
@@ -112,6 +113,9 @@ As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2
 | `end`     | volta ao estado livre (café, conversa no corredor)       |
 | `error`   | balão vermelho curto                                     |
 | `task`    | post-it no quadro de tarefas                             |
+| `session_end` | a sessão acabou: todos saem do escritório            |
+
+O `end` é o fim de um agente (o turno do principal ou o trabalho de um subagente) e a sessão continua. O `session_end` sai sempre que o core apaga uma sessão, seja no `SessionEnd` do Claude Code (com ou sem `reason`) ou no despejo da sessão parada há mais tempo quando o limite de sessões é atingido. Ele vem por último, depois de um `end` para cada agente, com `agent` = `"main"` e `result` = o `reason` do Claude Code quando existe, ou `"evicted"` no despejo.
 
 **Vantagens:**
 - **Mudanças no Claude Code:** só o tradutor precisa mudar.
@@ -224,7 +228,7 @@ As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2
 | Hook → app | variáveis `TERMBAY_EVENTS`, `TERMBAY_TOKEN` e `TERMBAY_PANE` no ambiente de cada shell; sem elas, `termbay-hook` sai na hora | aceito (22/11/2026): sem arquivo de descoberta; o `claude` fora do termbay não é afetado (E1) |
 | Redução do payload | no processo do hook, com lista fechada de campos | aceito (22/11/2026): conteúdo, comandos e caminhos nunca cruzam o socket (E2) |
 | Contrato do hook | sempre código 0, nada no stdout, prazo de 200 ms, entrada até 8 MiB | aceito (22/11/2026): o escritório nunca bloqueia nem atrasa o `claude` (E3) |
-| Formato próprio | chaves em inglês, `kind` em `start`/`tool`/`message`/`wait`/`end`/`error`/`task`, versão em `v` | aceito (22/11/2026): segue a regra de código em inglês (E4) |
+| Formato próprio | chaves em inglês, `kind` em `start`/`tool`/`message`/`wait`/`end`/`error`/`task`/`session_end`, versão em `v` | aceito (22/11/2026): segue a regra de código em inglês (E4) |
 | Estado do escritório | em Rust (`core::state`); a UI recebe foto inicial e mudanças por `Channel` | aceito (22/11/2026): testável sem DOM e igual para o futuro `serve` (E5) |
 | Servidor de eventos | `TcpListener` em `127.0.0.1:0`, HTTP mínimo à mão, token de 32 bytes em tempo constante, corpo até 64 KiB | aceito (22/11/2026): um endpoint local, sem `tokio` nem framework (E6) |
 | Instalação dos hooks | `termbay hooks install` no `~/.claude/settings.json` (ou `--project`), com prévia, confirmação e cópia de segurança | aceito (22/11/2026): instala uma vez para todos os projetos (E7) |

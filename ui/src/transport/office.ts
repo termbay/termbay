@@ -4,8 +4,13 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-/** What happened, in the office's terms (`core::state::Kind`). */
-export type OfficeKind = "start" | "tool" | "message" | "wait" | "end" | "error" | "task";
+/**
+ * What happened, in the office's terms (`core::state::Kind`). `end` is one
+ * agent finishing (a turn or its work); `session_end` is the whole session
+ * gone: always the session's last event, with `agent` "main", after an `end`
+ * for each agent, and `result` = Claude Code's reason or "evicted".
+ */
+export type OfficeKind = "start" | "tool" | "message" | "wait" | "end" | "error" | "task" | "session_end";
 
 /** One change in the office (`core::state::OfficeEvent`). */
 export interface OfficeEvent {
