@@ -4,6 +4,7 @@ import type { FrameClock } from "./loop";
 
 export class FakeClock implements FrameClock {
   private readonly callbacks = new Map<number, (time: number) => void>();
+  private readonly timers = new Map<number, { due: number; callback: () => void }>();
   private nextHandle = 1;
   now = 0;
   /** requestAnimationFrame calls so far. */
@@ -20,16 +21,37 @@ export class FakeClock implements FrameClock {
     this.callbacks.delete(handle);
   }
 
+  setTimer(callback: () => void, ms: number): number {
+    const handle = this.nextHandle++;
+    this.timers.set(handle, { due: this.now + ms, callback });
+    return handle;
+  }
+
+  clearTimer(handle: number): void {
+    this.timers.delete(handle);
+  }
+
   /** Frames waiting to run. */
   get pending(): number {
     return this.callbacks.size;
   }
 
-  /** One display frame, `ms` after the last. */
+  /** Timers waiting to fire. */
+  get pendingTimers(): number {
+    return this.timers.size;
+  }
+
+  /** One display frame, `ms` after the last; timers due by then fire first. */
   tick(ms = 1000 / 60): void {
     this.now += ms;
     const callbacks = [...this.callbacks.values()];
     this.callbacks.clear();
+    for (const [handle, timer] of [...this.timers]) {
+      if (timer.due <= this.now) {
+        this.timers.delete(handle);
+        timer.callback();
+      }
+    }
     for (const callback of callbacks) callback(this.now);
   }
 

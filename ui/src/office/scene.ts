@@ -13,24 +13,45 @@ import type { Size } from "./layout";
 
 export type { OfficeScene } from "./controller";
 
-/** Frames, size and visibility from the browser, for `container`. */
-export function browserHost(container: HTMLElement, win: Window = window): SceneHost {
+/** The parts of `window` the scene uses; tests pass a fake. */
+export type HostWindow = Pick<
+  Window,
+  "requestAnimationFrame" | "cancelAnimationFrame" | "setTimeout" | "clearTimeout" | "addEventListener" | "removeEventListener"
+> & {
+  readonly document: Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
+  readonly ResizeObserver?: typeof ResizeObserver;
+};
+
+/** Whether `size` is a real one: a hidden panel measures 0 x 0. */
+export const realSize = (size: Size): boolean => size.width > 0 && size.height > 0;
+
+/**
+ * Frames, size and visibility from the browser, for `container`. Sizes of
+ * 0 x 0 (the panel hidden) are never reported; the controller keeps the last
+ * real one.
+ */
+export function browserHost(container: HTMLElement, win: HostWindow = window): SceneHost {
   const doc = win.document;
   const measure = (): Size => ({ width: container.clientWidth, height: container.clientHeight });
   return {
     clock: {
       request: (callback) => win.requestAnimationFrame(callback),
       cancel: (handle) => win.cancelAnimationFrame(handle),
+      setTimer: (callback, ms) => win.setTimeout(callback, ms),
+      clearTimer: (handle) => win.clearTimeout(handle),
     },
     size: measure(),
     observeSize(onSize) {
-      const Observer = (win as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+      const report = () => {
+        const size = measure();
+        if (realSize(size)) onSize(size);
+      };
+      const Observer = win.ResizeObserver;
       if (typeof Observer !== "function") {
-        const listener = () => onSize(measure());
-        win.addEventListener("resize", listener);
-        return () => win.removeEventListener("resize", listener);
+        win.addEventListener("resize", report);
+        return () => win.removeEventListener("resize", report);
       }
-      const observer = new Observer(() => onSize(measure()));
+      const observer = new Observer(report);
       observer.observe(container);
       return () => observer.disconnect();
     },

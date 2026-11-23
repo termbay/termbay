@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { subscribeOffice, type OfficeEvent, type OfficeIpc, type OfficeSnapshot } from "../transport/office";
-import { createOfficeScene, type SceneFrame, type SceneHost, type SceneRenderer } from "./controller";
+import { createOfficeScene, frameKey, type SceneFrame, type SceneHost, type SceneRenderer } from "./controller";
 import { FakeClock } from "./fake-clock.test-util";
 import type { Size } from "./layout";
 
@@ -137,6 +137,53 @@ describe("createOfficeScene", () => {
     scene.setVisible(true);
     expect(clock.pending).toBe(0);
     scene.destroy();
+  });
+
+  it("a main agent waiting for hours draws only when its dots change, not at 30 fps", () => {
+    const { clock, renderer, scene } = setup();
+    scene.event(ev("main", { kind: "start" }));
+    scene.event(ev("main", { kind: "wait", action: "user" }));
+    // Let it walk to its desk and settle.
+    clock.run(60 * 20);
+    const draws = renderer.frames.length;
+    const requests = clock.requests;
+    // One minute at 60 Hz.
+    clock.run(60 * 60);
+    const minuteDraws = renderer.frames.length - draws;
+    const minuteRequests = clock.requests - requests;
+    // The dots change every THINK_FRAME_MS (400 ms): about 150 a minute.
+    expect(minuteDraws).toBeGreaterThan(100);
+    expect(minuteDraws).toBeLessThanOrEqual(160);
+    expect(minuteRequests).toBeLessThanOrEqual(320);
+    expect(scene.loop.sleeping || scene.loop.running).toBe(true);
+    // Each drawn frame differs from the one before.
+    const dots = renderer.frames.slice(draws).map((f) => f.characters[0]?.dots);
+    for (let i = 1; i < dots.length; i++) expect(dots[i]).not.toBe(dots[i - 1]);
+  });
+
+  it("never draws a frame that looks like the last one", () => {
+    const { clock, renderer, scene } = setup();
+    scene.event(ev("main", { kind: "start" }));
+    clock.run(60 * 20);
+    const keys = renderer.frames.map((f) => frameKey(f));
+    for (let i = 1; i < keys.length; i++) expect(keys[i]).not.toBe(keys[i - 1]);
+    // A change that shows nothing new (same bubble again) draws nothing.
+    scene.event(ev("main", { kind: "end" }));
+    clock.run(60 * 20);
+    const settled = renderer.frames.length;
+    scene.snapshot({ v: 1, sessions: [{ session: "s1", agents: [{ id: "main", activity: "idle" }], tasks: [] }] });
+    clock.run(10);
+    expect(renderer.frames).toHaveLength(settled);
+  });
+
+  it("redraws after being shown again, even with nothing new", () => {
+    const { clock, renderer, scene } = setup();
+    clock.tick();
+    const drawn = renderer.frames.length;
+    scene.setVisible(false);
+    scene.setVisible(true);
+    clock.tick();
+    expect(renderer.frames).toHaveLength(drawn + 1);
   });
 
   it("works as the listener of subscribeOffice", async () => {

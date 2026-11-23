@@ -20,6 +20,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // e2e/*.test.mjs: checks of the build scripts (the e2e specs are in e2e/specs).
+    include: ["src/**/*.test.ts", "e2e/*.test.mjs"],
   },
 });

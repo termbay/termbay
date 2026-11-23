@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { OfficeEvent, OfficeSnapshot } from "../transport/office";
 import { DEMO } from "./demo";
 import { breakSpot, inCorridor } from "./layout";
-import { BUBBLE_MS, LINGER_MS, MAX_AGENTS, OfficeModel, type CharacterView } from "./model";
+import { BUBBLE_MS, LINGER_MS, MAX_AGENTS, OfficeModel, THINK_FRAME_MS, TYPE_FRAME_MS, type CharacterView } from "./model";
 
 const SIZE = { width: 320, height: 600 };
 const ev = (agent: string, fields: Partial<OfficeEvent>): OfficeEvent => ({ v: 1, session: "s1", agent, kind: "tool", ...fields });
@@ -247,5 +247,72 @@ describe("OfficeModel: the demo, a session with two subagents", () => {
     run(model, 30_000);
     expect(model.characters()).toEqual([]);
     expect(model.busy()).toBe(false);
+  });
+});
+
+describe("OfficeModel: when the picture changes next", () => {
+  it("is 0 while someone walks, then the next typing frame, then nothing", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    expect(model.nextChangeIn()).toBe(0);
+    run(model, 20_000);
+    // Typing at the desk: at most one typing frame away.
+    const typing = model.nextChangeIn();
+    expect(typing).toBeGreaterThan(0);
+    expect(typing).toBeLessThanOrEqual(TYPE_FRAME_MS);
+    model.event(ev("main", { kind: "wait", action: "user" }));
+    run(model, 1000);
+    expect(model.nextChangeIn()).toBeLessThanOrEqual(THINK_FRAME_MS);
+    expect(model.nextChangeIn()).toBeGreaterThan(0);
+    model.event(ev("main", { kind: "end" }));
+    run(model, 2000);
+    expect(model.nextChangeIn()).toBe(Number.POSITIVE_INFINITY);
+    expect(model.busy()).toBe(false);
+  });
+
+  it("wakes up for the end of a linger", () => {
+    const model = new OfficeModel(SIZE);
+    model.snapshot(snap([{ session: "s1", agents: [{ id: "main", activity: "idle" }, { id: "a1", activity: "working" }], tasks: [] }]));
+    model.event(ev("a1", { kind: "end", result: "done" }));
+    run(model, 1000);
+    expect(model.nextChangeIn()).toBeCloseTo(LINGER_MS - 1000, -2);
+  });
+
+  it("dots and typing frames come from the model's own time", () => {
+    const model = new OfficeModel(SIZE);
+    model.snapshot(snap([{ session: "s1", agents: [{ id: "main", activity: "waiting" }], tasks: [] }]));
+    const dots = new Set<number>();
+    for (let i = 0; i < 8; i++) {
+      model.step(THINK_FRAME_MS);
+      dots.add(who(model, "main").dots);
+    }
+    expect([...dots].sort()).toEqual([0, 1, 2, 3]);
+    expect(who(model, "main").seated).toBe(true);
+    expect(who(model, "main").typeFrame).toBe(0);
+  });
+});
+
+describe("OfficeModel: the end of a session, as core::state signals it", () => {
+  // core::state on SessionEnd removes the session and sends an end for each
+  // agent, main last, with `result` = the hook's `reason`. Stop sends the
+  // same end for main, never with a result. Without a reason the two cannot
+  // be told apart, so the scene keeps the session: main idle at its desk.
+  it("without a reason, the main agent's end looks like Stop: the session stays", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    model.event(ev("main", { kind: "end" }));
+    run(model, 20_000);
+    expect(model.agents().map((s) => s.session)).toEqual(["s1"]);
+    expect(who(model, "main").place).toBe("desk");
+  });
+
+  it("a new picture without the session closes it, reason or not", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    model.event(ev("main", { kind: "end" }));
+    model.snapshot(snap([]));
+    expect(who(model, "main").place).toBe("out");
+    run(model, 20_000);
+    expect(model.characters()).toEqual([]);
   });
 });
