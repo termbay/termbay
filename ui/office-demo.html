@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>termbay office demo</title>
+    <!-- Dev only (npm run dev, then /office-demo.html): not part of the build. -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #111318; color: #c8ccd4; font: 12px monospace; }
+      body { display: flex; gap: 12px; padding: 12px; box-sizing: border-box; }
+      #office { width: 320px; height: 100%; border: 1px solid #2a2e36; overflow: hidden; }
+      #office canvas { display: block; }
+      #controls { display: flex; flex-direction: column; gap: 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="office"></div>
+    <div id="controls">
+      <button id="toggle">hide</button>
+      <button id="wide">wide / narrow</button>
+      <label>speed <select id="speed"><option>1</option><option>2</option><option>4</option></select></label>
+      <span id="status"></span>
+    </div>
+    <script type="module" src="/src/office/demo-page.ts"></script>
+  </body>
+</html>
