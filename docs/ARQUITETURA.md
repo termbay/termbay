@@ -102,7 +102,7 @@ O escritório não conhece o formato do Claude Code, só este formato próprio. 
 { "v": 1, "session": "s1", "pane": "p3", "agent": "main", "kind": "session_end", "result": "clear" }
 ```
 
-As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2-PLANO.md)). Campos desconhecidos são ignorados, e a versão fica em `v`.
+As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2-PLANO.md)). Campos desconhecidos são ignorados, assim como um `kind` desconhecido, e a versão fica em `v`. É isso que permite acrescentar um `kind` (como o `session_end`) sem mudar a versão: `v` só muda quando um campo ou `kind` existente muda de sentido.
 
 | kind      | no escritório                                            |
 |-----------|----------------------------------------------------------|
@@ -115,7 +115,7 @@ As chaves são em inglês, como o resto do código (E4 em [FASE2-PLANO.md](FASE2
 | `task`    | post-it no quadro de tarefas                             |
 | `session_end` | a sessão acabou: todos saem do escritório            |
 
-O `end` é o fim de um agente (o turno do principal ou o trabalho de um subagente) e a sessão continua. O `session_end` sai sempre que o core apaga uma sessão, seja no `SessionEnd` do Claude Code (com ou sem `reason`) ou no despejo da sessão parada há mais tempo quando o limite de sessões é atingido. Ele vem por último, depois de um `end` para cada agente, com `agent` = `"main"` e `result` = o `reason` do Claude Code quando existe, ou `"evicted"` no despejo.
+O `end` é o fim de um agente (o turno do principal ou o trabalho de um subagente) e a sessão continua. O `session_end` sai sempre que o core apaga uma sessão, seja no `SessionEnd` do Claude Code (com ou sem `reason`) ou no despejo da sessão parada há mais tempo quando o limite de sessões é atingido. Ele vem por último, depois de um `end` para cada agente, com `agent` = `"main"` e `result` = o `reason` do Claude Code quando existe, ou `"evicted"` no despejo. Um agente despejado quando a sessão atinge o limite de agentes recebe um `end` com `result` = `"evicted"`.
 
 **Vantagens:**
 - **Mudanças no Claude Code:** só o tradutor precisa mudar.

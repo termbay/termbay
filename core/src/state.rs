@@ -36,7 +36,8 @@ pub const MAIN_AGENT: &str = "main";
 /// Sessions kept at once; the one idle the longest goes first.
 pub const MAX_SESSIONS: usize = 16;
 /// `result` of the [`Kind::SessionEnd`] sent when a session is dropped to
-/// make room for a new one ([`MAX_SESSIONS`]).
+/// make room for a new one ([`MAX_SESSIONS`]), and of the [`Kind::End`] sent
+/// when an agent is dropped for the same reason ([`MAX_AGENTS`]).
 pub const EVICTED: &str = "evicted";
 /// Agents kept per session; the one idle the longest goes first.
 pub const MAX_AGENTS: usize = 64;
@@ -460,10 +461,10 @@ fn start_event(e: &ReducedEvent, pane: &Option<String>, agent: &AgentView) -> Of
 
 /// Makes sure `id` is in the session (an agent seen for the first time
 /// through one of its own events, without a `SubagentStart`).
-fn ensure(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Option<OfficeEvent> {
+fn ensure(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Vec<OfficeEvent> {
     if let Some(agent) = session.agent(id) {
         agent.last_seen = clock;
-        return None;
+        return Vec::new();
     }
     let role = if id == MAIN_AGENT {
         None
@@ -475,8 +476,9 @@ fn ensure(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Opti
         .clone()
         .or_else(|| session.linked.get(id).and_then(|(n, _)| n.clone()));
     let color = session.linked.get(id).and_then(|(_, c)| c.clone());
-    add_agent(
+    let mut out: Vec<OfficeEvent> = add_agent(
         session,
+        e,
         Agent {
             view: AgentView {
                 id: id.to_owned(),
@@ -490,16 +492,23 @@ fn ensure(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Opti
             handback: None,
             last_seen: clock,
         },
-    );
+    )
+    .into_iter()
+    .collect();
     let agent = session
         .agents
         .iter()
         .find(|a| a.view.id == id)
         .expect("added");
-    Some(start_event(e, &session.pane, &agent.view))
+    out.push(start_event(e, &session.pane, &agent.view));
+    out
 }
 
-fn add_agent(session: &mut Session, agent: Agent) {
+/// Adds `agent` to the session. When the session is full, the subagent idle
+/// the longest leaves first, and its `End` (`result` [`EVICTED`]) is
+/// returned so the page does not keep it around.
+fn add_agent(session: &mut Session, e: &ReducedEvent, agent: Agent) -> Option<OfficeEvent> {
+    let mut gone = None;
     if session.agents.len() == MAX_AGENTS
         && let Some(i) = session
             .agents
@@ -509,13 +518,17 @@ fn add_agent(session: &mut Session, agent: Agent) {
             .min_by_key(|(_, a)| a.last_seen)
             .map(|(i, _)| i)
     {
-        session.agents.remove(i);
+        let evicted = session.agents.remove(i);
+        let mut ev = event(e, &session.pane, &evicted.view.id, Kind::End);
+        ev.result = Some(EVICTED.to_owned());
+        gone = Some(ev);
     }
     if agent.view.id == MAIN_AGENT {
         session.agents.insert(0, agent);
     } else {
         session.agents.push(agent);
     }
+    gone
 }
 
 /// `SubagentStart`: a new agent arrives, or a known one comes back.
@@ -543,8 +556,9 @@ fn arrive(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Vec<
         // A teammate whose spawn we did not see: agent_type is its name.
         name = e.teammate_name.clone();
     }
-    add_agent(
+    let mut out: Vec<OfficeEvent> = add_agent(
         session,
+        e,
         Agent {
             view: AgentView {
                 id: id.to_owned(),
@@ -558,7 +572,9 @@ fn arrive(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Vec<
             handback: None,
             last_seen: clock,
         },
-    );
+    )
+    .into_iter()
+    .collect();
     let view = session
         .agents
         .iter()
@@ -566,7 +582,8 @@ fn arrive(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Vec<
         .expect("added")
         .view
         .clone();
-    vec![start_event(e, &session.pane, &view)]
+    out.push(start_event(e, &session.pane, &view));
+    out
 }
 
 /// Tools that are plumbing, not work: no bubble.
@@ -643,7 +660,7 @@ fn pre_tool(session: &mut Session, e: &ReducedEvent, id: &str, clock: u64) -> Ve
     if is_silent(tool) {
         return Vec::new();
     }
-    let mut out: Vec<OfficeEvent> = ensure(session, e, id, clock).into_iter().collect();
+    let mut out = ensure(session, e, id, clock);
     match tool {
         "Agent" | "Task" => {
             if session.pending.len() == MAX_PENDING {
