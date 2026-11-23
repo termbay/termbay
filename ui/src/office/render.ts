@@ -344,6 +344,13 @@ export class PixiRenderer implements SceneRenderer {
       eventFeatures: { move: false, globalMove: false, click: true, wheel: false },
       });
     } catch (error) {
+      // Whatever init created (a context, listeners) goes too; a failure
+      // while cleaning up must not hide the first error.
+      try {
+        app.destroy({ removeView: true });
+      } catch (cleanup) {
+        console.error("[termbay] could not clean up the office canvas", cleanup);
+      }
       releaseSystemTicker();
       throw error;
     }

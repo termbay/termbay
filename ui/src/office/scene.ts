@@ -76,7 +76,14 @@ export async function mountOfficeScene(container: HTMLElement): Promise<OfficeSc
   const { PixiRenderer } = await import("./render");
   const renderer = await PixiRenderer.create(container, host.size);
   container.classList.add("office-scene");
-  return createOfficeScene(renderer, host);
+  const scene = createOfficeScene(renderer, host);
+  const destroy = scene.destroy;
+  return Object.assign(scene, {
+    destroy() {
+      destroy();
+      container.classList.remove("office-scene");
+    },
+  });
 }
 
 /**

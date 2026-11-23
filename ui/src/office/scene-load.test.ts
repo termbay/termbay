@@ -39,6 +39,7 @@ describe("loadOfficeContent", () => {
     content.setVisible(false);
     content.destroy();
     expect(render.destroyed).toBe(1);
+    expect(host.classList.contains("office-scene")).toBe(false);
   });
 
   it("falls back to an empty panel when the canvas cannot be created", async () => {

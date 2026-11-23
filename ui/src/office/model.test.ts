@@ -199,6 +199,23 @@ describe("OfficeModel: bubbles, size and limits", () => {
     expect(at(c)).toEqual(round(seatOf(model, 0)));
   });
 
+  it("when full, an agent the core evicted makes room, and the count matches the core's", () => {
+    const model = new OfficeModel(SIZE);
+    model.event(ev("main", { kind: "start" }));
+    for (let i = 1; i < MAX_AGENTS; i++) model.event(ev(`a${i}`, { kind: "start" }));
+    run(model, 1000);
+    // core::state, full: drops the least recently seen (here a5), then the new one starts.
+    model.event(ev("a5", { kind: "end", result: "evicted" }));
+    model.event(ev("new", { kind: "start" }));
+    const core = ["main", ...Array.from({ length: MAX_AGENTS - 1 }, (_, i) => `a${i + 1}`).filter((id) => id !== "a5"), "new"];
+    const ids = model.agents()[0]?.agents.map((a) => a.id) ?? [];
+    expect(ids).toHaveLength(MAX_AGENTS);
+    expect(ids).toEqual(core);
+    expect(ids).toContain("a1");
+    run(model, 30_000);
+    expect(model.characters().map((c) => c.id).sort()).toEqual([...core].sort());
+  });
+
   it("never holds more than MAX_AGENTS per session, keeping main", () => {
     const model = new OfficeModel(SIZE);
     model.event(ev("main", { kind: "start" }));
