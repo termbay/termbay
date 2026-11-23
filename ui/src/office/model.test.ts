@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { OfficeEvent, OfficeSnapshot } from "../transport/office";
 import { DEMO } from "./demo";
 import { breakSpot, inCorridor } from "./layout";
-import { BUBBLE_MS, LINGER_MS, MAX_AGENTS, OfficeModel, THINK_FRAME_MS, TYPE_FRAME_MS, type CharacterView } from "./model";
+import { BUBBLE_MS, LINGER_MS, MAX_AGENTS, OfficeModel, THINK_FRAME_MS, TYPE_FRAME_MS, summarize, type CharacterView } from "./model";
 
 const SIZE = { width: 320, height: 600 };
 const ev = (agent: string, fields: Partial<OfficeEvent>): OfficeEvent => ({ v: 1, session: "s1", agent, kind: "tool", ...fields });
@@ -155,6 +155,7 @@ describe("OfficeModel: pictures", () => {
     expect(at(who(model, "main"))).toEqual(round(seatOf(model, 0)));
     expect(at(who(model, "a1"))).toEqual(round(seatOf(model, 1)));
     expect(who(model, "a2").place).toBe("coffee");
+    expect(model.agents()).toEqual(summarize(picture));
     expect(model.agents()).toEqual([
       {
         session: "s1",

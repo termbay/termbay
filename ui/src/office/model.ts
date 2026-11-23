@@ -130,7 +130,26 @@ function bubbleVisible(c: Character): boolean {
   return c.bubble !== null && (sticky(c.bubble) || c.bubbleAge < BUBBLE_MS);
 }
 
-const keyOf = (session: string, agent: string) => `${session}\u0000${agent}`;
+/**
+ * The core's picture in the shape of `OfficeModel.agents()`, to compare the
+ * two (the e2e test does): bubbles cleaned as the scene shows them.
+ */
+export function summarize(snapshot: OfficeSnapshot): SessionSummary[] {
+  return snapshot.sessions.slice(0, MAX_SESSIONS).map((s) => ({
+    session: s.session,
+    agents: s.agents.slice(0, MAX_AGENTS).map((a) => {
+      const bubble = snapshotBubble(a);
+      return {
+        id: a.id,
+        ...(a.name !== undefined ? { name: a.name } : {}),
+        activity: a.activity,
+        ...(bubble ? { bubble: bubble.text } : {}),
+      };
+    }),
+  }));
+}
+
+const keyOf =(session: string, agent: string) => `${session}\u0000${agent}`;
 
 export class OfficeModel {
   private sessions: Session[] = [];

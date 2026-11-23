@@ -13,7 +13,12 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Must not be in any file of the build. */
-export const MARKERS = ["termbay-e2e-dom-renderer", "termbay-e2e-office-debug", "termbay-office-demo"];
+export const MARKERS = [
+  "termbay-e2e-dom-renderer",
+  "termbay-e2e-office-debug",
+  "termbay-e2e-office-probe",
+  "termbay-office-demo",
+];
 /** Must not be a file of the build. */
 export const FORBIDDEN_FILES = [/^office-demo/];
 /** PixiJS's own name, as its code spells it ("pixi.js", "PixiJS"). */
