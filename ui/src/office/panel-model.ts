@@ -21,8 +21,12 @@ export const DEFAULT_PANEL_WIDTH = 360;
  */
 export function clampWidth(width: number, viewport: number): number {
   const wanted = Number.isFinite(width) ? width : DEFAULT_PANEL_WIDTH;
-  const max = Math.min(MAX_PANEL_WIDTH, Math.max(0, viewport - MIN_TERMINAL_WIDTH));
-  return Math.round(Math.min(Math.max(wanted, MIN_PANEL_WIDTH), max));
+  return Math.round(Math.min(Math.max(wanted, MIN_PANEL_WIDTH), maxWidth(viewport)));
+}
+
+/** Widest panel in a window `viewport` pixels wide (see clampWidth). */
+export function maxWidth(viewport: number): number {
+  return Math.round(Math.min(MAX_PANEL_WIDTH, Math.max(0, viewport - MIN_TERMINAL_WIDTH)));
 }
 
 /** True when the picture of the office has at least one agent. */
@@ -39,8 +43,11 @@ export interface PanelModelOptions {
 
 export class PanelModel {
   private isOpen = false;
-  /** An agent was seen in this window: later agents never reopen the panel. */
-  private sawAgent = false;
+  /**
+   * Opening by itself is no longer possible: an agent was already seen in
+   * this window, or the person closed the panel, even before any agent.
+   */
+  private autoOpenSpent = false;
   private preferred: number;
 
   constructor(private readonly options: PanelModelOptions) {
@@ -64,11 +71,12 @@ export class PanelModel {
 
   /**
    * An agent showed up. Opens the panel the first time only, when
-   * `auto_open` is on; returns true when this call opened it.
+   * `auto_open` is on and the person has not closed it yet; returns true
+   * when this call opened it.
    */
   agentSeen(): boolean {
-    if (this.sawAgent) return false;
-    this.sawAgent = true;
+    if (this.autoOpenSpent) return false;
+    this.autoOpenSpent = true;
     if (!this.options.autoOpen || this.isOpen) return false;
     this.isOpen = true;
     return true;
@@ -76,13 +84,15 @@ export class PanelModel {
 
   /** The shortcut: opens or closes. Returns the new state. */
   toggle(): boolean {
-    this.isOpen = !this.isOpen;
+    if (this.isOpen) this.close();
+    else this.isOpen = true;
     return this.isOpen;
   }
 
-  /** The close button. */
+  /** The close button. Closed by the person, the panel never opens by itself again. */
   close(): void {
     this.isOpen = false;
+    this.autoOpenSpent = true;
   }
 
   /** The divider moved: keeps the width fitted to the window and returns it. */

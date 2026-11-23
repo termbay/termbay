@@ -8,6 +8,7 @@ import {
   PanelModel,
   clampWidth,
   hasAgents,
+  maxWidth,
 } from "./panel-model";
 
 describe("clampWidth", () => {
@@ -16,6 +17,12 @@ describe("clampWidth", () => {
     expect(clampWidth(10, 1600)).toBe(MIN_PANEL_WIDTH);
     expect(clampWidth(5000, 4000)).toBe(MAX_PANEL_WIDTH);
     expect(clampWidth(400.6, 1600)).toBe(401);
+  });
+
+  it("gives the widest panel for a window", () => {
+    expect(maxWidth(1000)).toBe(1000 - MIN_TERMINAL_WIDTH);
+    expect(maxWidth(5000)).toBe(MAX_PANEL_WIDTH);
+    expect(maxWidth(100)).toBe(0);
   });
 
   it("leaves room for the terminals", () => {
@@ -49,6 +56,19 @@ describe("PanelModel", () => {
     model.close();
     expect(model.agentSeen()).toBe(false);
     expect(model.open).toBe(false);
+  });
+
+  it("does not open by itself after the person closed it, even before any agent", () => {
+    const model = new PanelModel({ autoOpen: true });
+    model.toggle();
+    model.toggle();
+    expect(model.agentSeen()).toBe(false);
+    expect(model.open).toBe(false);
+
+    const other = new PanelModel({ autoOpen: true });
+    other.close();
+    expect(other.agentSeen()).toBe(false);
+    expect(other.open).toBe(false);
   });
 
   it("does not open by itself with auto_open off", () => {

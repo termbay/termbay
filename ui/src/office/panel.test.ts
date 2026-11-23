@@ -3,8 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OfficeEvent, OfficeListener, OfficeSnapshot } from "../transport/office";
 import type { OfficeContent } from "./content";
-import { KEY_STEP, MAX_HELD_EVENTS, OfficePanel, WIDTH_KEY, localWidthStore, type WidthStore } from "./panel";
-import { DEFAULT_PANEL_WIDTH, MIN_PANEL_WIDTH, PanelModel } from "./panel-model";
+import {
+  KEY_STEP,
+  MAX_HELD_EVENTS,
+  OfficePanel,
+  RESUBSCRIBE_RETRY_MS,
+  WIDTH_KEY,
+  localWidthStore,
+  type WidthStore,
+} from "./panel";
+import { DEFAULT_PANEL_WIDTH, MAX_PANEL_WIDTH, MIN_PANEL_WIDTH, MIN_TERMINAL_WIDTH, PanelModel } from "./panel-model";
 
 const event = (fields: Partial<OfficeEvent> = {}): OfficeEvent => ({ v: 1, session: "s1", agent: "main", kind: "tool", ...fields });
 const empty: OfficeSnapshot = { v: 1, sessions: [] };
@@ -129,6 +137,15 @@ describe("OfficePanel", () => {
     expect(focusTerminal).toHaveBeenCalledTimes(1);
   });
 
+  it("closed by the person before any agent, it does not open by itself", () => {
+    const { panel, office, load } = setup();
+    office.toggle();
+    office.toggle();
+    office.event(event());
+    expect(panel.hidden).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it("with auto_open off, opens only by the shortcut", async () => {
     const { panel, office, content, load } = setup({ autoOpen: false });
     office.snapshot(busy);
@@ -149,10 +166,75 @@ describe("OfficePanel", () => {
     for (let i = 0; i <= MAX_HELD_EVENTS; i++) office.event(event({ target: `e${i}` }));
     office.toggle();
     await office.ready();
-    expect(resubscribe).toHaveBeenCalledWith(content);
-    // The content has its own subscription now: the panel stops forwarding.
-    office.event(event({ target: "dup" }));
-    expect(content.calls).toEqual(["snapshot:1", "visible:true"]);
+    // The panel stays the only listener: the new subscription replaces the old one.
+    expect(resubscribe).toHaveBeenCalledWith(office);
+    office.event(event({ target: "live" }));
+    expect(content.calls).toEqual(["snapshot:1", "visible:true", "event:live"]);
+  });
+
+  it("tries the fresh subscription again until it works, showing no old state meanwhile", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      let failures = 2;
+      const resubscribe = vi.fn(async (listener: OfficeListener) => {
+        if (failures-- > 0) throw new Error("ipc down");
+        listener.snapshot(busy);
+      });
+      const { office, content } = setup({ autoOpen: false, resubscribe });
+      office.snapshot(empty);
+      for (let i = 0; i <= MAX_HELD_EVENTS; i++) office.event(event({ target: `e${i}` }));
+      office.toggle();
+      await office.ready();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(resubscribe).toHaveBeenCalledTimes(1);
+      // Changes after an old picture would be wrong: dropped until the fresh one.
+      office.event(event({ target: "while-down" }));
+      expect(content.calls).toEqual(["visible:true"]);
+
+      await vi.advanceTimersByTimeAsync(RESUBSCRIBE_RETRY_MS);
+      expect(resubscribe).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(RESUBSCRIBE_RETRY_MS * 2);
+      expect(resubscribe).toHaveBeenCalledTimes(3);
+      office.event(event({ target: "live" }));
+      expect(content.calls).toEqual(["visible:true", "snapshot:1", "event:live"]);
+      expect(error).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops trying when destroyed", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const resubscribe = vi.fn(async () => Promise.reject(new Error("ipc down")));
+      const { office } = setup({ autoOpen: false, resubscribe });
+      office.snapshot(empty);
+      for (let i = 0; i <= MAX_HELD_EVENTS; i++) office.event(event());
+      office.toggle();
+      await office.ready();
+      await vi.advanceTimersByTimeAsync(0);
+      office.destroy();
+      current = null;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(resubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("without a way to resubscribe, keeps every change instead of an old picture", async () => {
+    const { office, content } = setup({ autoOpen: false });
+    office.snapshot(busy);
+    for (let i = 0; i < MAX_HELD_EVENTS + 10; i++) office.event(event({ target: `e${i}` }));
+    office.toggle();
+    await office.ready();
+    expect(content.calls[0]).toBe("snapshot:1");
+    expect(content.calls.filter((c) => c.startsWith("event:")).length).toBe(MAX_HELD_EVENTS + 10);
+    expect(content.calls.at(-2)).toBe(`event:e${MAX_HELD_EVENTS + 9}`);
   });
 
   it("tries again on the next opening when the content fails to load", async () => {
@@ -194,6 +276,46 @@ describe("OfficePanel", () => {
     // Moving after the drag ended changes nothing.
     pointer("pointermove", 1000);
     expect(panel.style.width).toBe(`${MIN_PANEL_WIDTH}px`);
+  });
+
+  it("ends the drag when the pointer capture is lost", () => {
+    const store = memoryStore();
+    const { root, panel, office } = setup({ autoOpen: false, store });
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({ right: 1600 } as DOMRect);
+    office.toggle();
+    const divider = office.dividerElement;
+    divider.dispatchEvent(new PointerEvent("pointerdown", { clientX: 1240, button: 0, pointerId: 1 }));
+    divider.dispatchEvent(new PointerEvent("pointermove", { clientX: 1100, pointerId: 1 }));
+    divider.dispatchEvent(new PointerEvent("lostpointercapture", { pointerId: 1 }));
+    expect(root.classList.contains("office-resizing")).toBe(false);
+    expect(store.saved).toEqual([500]);
+    divider.dispatchEvent(new PointerEvent("pointermove", { clientX: 900, pointerId: 1 }));
+    expect(panel.style.width).toBe("500px");
+  });
+
+  it("destroy during a drag removes its listeners and the resizing class", () => {
+    const store = memoryStore();
+    const { root, panel, office } = setup({ autoOpen: false, store });
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue({ right: 1600 } as DOMRect);
+    office.toggle();
+    const divider = office.dividerElement;
+    divider.dispatchEvent(new PointerEvent("pointerdown", { clientX: 1240, button: 0, pointerId: 1 }));
+    divider.dispatchEvent(new PointerEvent("pointermove", { clientX: 1100, pointerId: 1 }));
+    office.destroy();
+    current = null;
+    expect(root.classList.contains("office-resizing")).toBe(false);
+    divider.dispatchEvent(new PointerEvent("pointermove", { clientX: 900, pointerId: 1 }));
+    expect(panel.style.width).toBe("500px");
+    expect(store.saved).toEqual([]);
+  });
+
+  it("tells assistive technology the divider's limits", () => {
+    const { office } = setup({ autoOpen: false });
+    office.toggle();
+    const divider = office.dividerElement;
+    expect(divider.getAttribute("aria-valuemin")).toBe(String(MIN_PANEL_WIDTH));
+    expect(divider.getAttribute("aria-valuemax")).toBe(String(Math.min(MAX_PANEL_WIDTH, 1600 - MIN_TERMINAL_WIDTH)));
+    expect(divider.getAttribute("aria-valuenow")).toBe(String(DEFAULT_PANEL_WIDTH));
   });
 
   it("resizes with the arrow keys and resets on double click", () => {
