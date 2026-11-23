@@ -14,7 +14,7 @@ import { LayoutView } from "./layout/view";
 import { detectOs } from "./platform/os";
 import { TerminalView } from "./terminal/view";
 import { DEFAULT_CONFIG, loadConfig } from "./transport/config";
-import { subscribeOffice, tauriOfficeIpc, type OfficeListener } from "./transport/office";
+import { singleSubscription, tauriOfficeIpc } from "./transport/office";
 import { createTransport } from "./transport/select";
 import { tauriIpc } from "./transport/tauri";
 
@@ -87,7 +87,8 @@ function startOffice(inTauri: boolean, autoOpen: boolean, focusTerminal: () => v
   const panel = document.getElementById("office-panel");
   if (!root || !panel) return null;
   const store = localWidthStore(() => window.localStorage);
-  const subscribe = (listener: OfficeListener) => subscribeOffice(tauriOfficeIpc, listener);
+  // Resubscribing (after the panel missed too many changes) cancels the first subscription.
+  const subscribe = singleSubscription(tauriOfficeIpc);
   const office = new OfficePanel({
     root,
     panel,

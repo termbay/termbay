@@ -78,16 +78,38 @@ export interface OfficeListener {
 
 /**
  * Subscribes to the office: `listener.snapshot` gets the picture first, then
- * `listener.event` each change as it arrives.
+ * `listener.event` each change as it arrives. Once `signal` is aborted the
+ * listener gets nothing more from this subscription.
  */
-export async function subscribeOffice(ipc: OfficeIpc, listener: OfficeListener): Promise<void> {
+export async function subscribeOffice(ipc: OfficeIpc, listener: OfficeListener, signal?: AbortSignal): Promise<void> {
   // A change can come through the channel before the picture is returned;
   // hold it until the picture is delivered, so nothing is applied out of order.
   let early: OfficeEvent[] | null = [];
-  const channel = ipc.channel((event) => (early ? early.push(event) : listener.event(event)));
+  const channel = ipc.channel((event) => {
+    if (signal?.aborted) return;
+    if (early) early.push(event);
+    else listener.event(event);
+  });
   const snapshot = await ipc.invoke<OfficeSnapshot>("office_subscribe", { events: channel });
+  if (signal?.aborted) return;
   listener.snapshot(snapshot);
   const held = early;
   early = null;
   for (const event of held) listener.event(event);
+}
+
+/**
+ * One office subscription at a time: each call cancels the previous one
+ * before subscribing again, so a listener never gets a change twice. The
+ * core keeps sending to a cancelled channel until the page goes away; its
+ * messages are dropped here.
+ */
+export function singleSubscription(ipc: OfficeIpc): (listener: OfficeListener) => Promise<void> {
+  let current: AbortController | null = null;
+  return (listener) => {
+    current?.abort();
+    const controller = new AbortController();
+    current = controller;
+    return subscribeOffice(ipc, listener, controller.signal);
+  };
 }

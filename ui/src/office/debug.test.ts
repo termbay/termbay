@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 
-import { subscribeOffice, type OfficeEvent, type OfficeIpc, type OfficeSnapshot } from "../transport/office";
+import { singleSubscription, subscribeOffice, type OfficeEvent, type OfficeIpc, type OfficeSnapshot } from "../transport/office";
 import { DEBUG_LINES, OfficeDebugList, formatAgent, formatEvent } from "./debug";
 
 const event = (fields: Partial<OfficeEvent>): OfficeEvent => ({ v: 1, session: "s1", agent: "main", kind: "tool", ...fields });
@@ -96,5 +96,34 @@ describe("subscribeOffice", () => {
     const seen: string[] = [];
     await subscribeOffice(ipc, { snapshot: () => seen.push("snapshot"), event: (e) => seen.push(e.kind) });
     expect(seen).toEqual(["snapshot", "start"]);
+  });
+
+  it("stops delivering once cancelled, and a new single subscription cancels the old one", async () => {
+    const pushes: Array<(e: OfficeEvent) => void> = [];
+    const ipc: OfficeIpc = {
+      channel: (onMessage) => {
+        pushes.push(onMessage);
+        return `channel${pushes.length}`;
+      },
+      invoke: async <T>() => snapshot([]) as T,
+    };
+    const seen: string[] = [];
+    const listener = { snapshot: () => seen.push("snapshot"), event: (e: OfficeEvent) => seen.push(e.kind) };
+    const subscribe = singleSubscription(ipc);
+    await subscribe(listener);
+    pushes[0]?.(event({ kind: "start" }));
+    await subscribe(listener);
+    pushes[0]?.(event({ kind: "end" })); // old channel: dropped
+    pushes[1]?.(event({ kind: "tool" }));
+    expect(seen).toEqual(["snapshot", "start", "snapshot", "tool"]);
+
+    // Cancelled before the picture comes back: nothing at all.
+    const controller = new AbortController();
+    const late: string[] = [];
+    const pending = subscribeOffice(ipc, { snapshot: () => late.push("snapshot"), event: (e) => late.push(e.kind) }, controller.signal);
+    controller.abort();
+    await pending;
+    pushes[2]?.(event({ kind: "tool" }));
+    expect(late).toEqual([]);
   });
 });
